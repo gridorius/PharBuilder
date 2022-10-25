@@ -27,7 +27,7 @@ class Builder
     }
 
     public function createPhar(){
-        $this->buildName = $this->config['outName'] ?? $this->config['name'] . '.phar';
+        $this->buildName = ($this->config['outName'] ?? $this->config['name'] ?? 'build') . '.phar';
         if($this->config['outDir']){
             $this->buildDirectory = $this->folder.DIRECTORY_SEPARATOR.$this->config['outDir'];
         }else{
@@ -41,6 +41,7 @@ class Builder
         $pharPath = $this->buildDirectory.DIRECTORY_SEPARATOR.$this->buildName;
 
         $this->phar = new Phar($pharPath, 0, $this->buildName);
+        $this->phar->startBuffering();
     }
 
     public function loadIncludes(){
