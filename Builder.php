@@ -99,7 +99,7 @@ class Builder
         $finder = new RecursiveFinder();
         $pattern = $this->config['pattern'] ?? "/\.php/";
         foreach ($finder->find($this->folder, $pattern) as $path) {
-            $innerPath = uniqid('include/include_').'.php';
+            $innerPath = uniqid('include/include_') . '.php';
             $this->phar->addFile($path, $innerPath);
         }
 
@@ -112,12 +112,11 @@ class Builder
         $stub = '<?php' . PHP_EOL;
         $stub .= "Phar::mapPhar('{$this->buildName}');" . PHP_EOL;
         $stub .= "\$pharRoot = \"phar://{$this->buildName}\";" . PHP_EOL;
-        $stub .= "set_include_path(\$pharRoot.'/include');" . PHP_EOL;
         $stub .=
 "foreach (glob(\$pharRoot.'/include/*.php') as \$filename)
 {
     include \$filename;
-}";
+}" . PHP_EOL;
 
         $stub .= $this->config['start'] . PHP_EOL;
         $stub .= "__HALT_COMPILER();" . PHP_EOL;
