@@ -41,11 +41,11 @@ class Builder
 
     protected function buildDepends()
     {
-        foreach ($this->config['depends'] as $path){
+        foreach ($this->config['depends'] as $path) {
             $subBuilder = new static($path, $this->buildDirectory);
             $subBuilder->build();
 
-            $this->depends[] = $subBuilder->getBuildName().'.phar';
+            $this->depends[] = $subBuilder->getBuildName() . '.phar';
         }
     }
 
@@ -61,7 +61,8 @@ class Builder
         $this->phar->startBuffering();
     }
 
-    public function getBuildName(){
+    public function getBuildName()
+    {
         return $this->buildName;
     }
 
@@ -95,33 +96,30 @@ class Builder
 
     public function build()
     {
-        $include = [];
         $finder = new RecursiveFinder();
         $pattern = $this->config['pattern'] ?? "/\.php/";
         foreach ($finder->find($this->folder, $pattern) as $path) {
-            $pharPath = str_replace($this->folder . '/', '', $path);
-            $include[] = $pharPath;
-            $this->phar->addFile($path, $pharPath);
+            $innerPath = uniqid('include/include_').'.php';
+            $this->phar->addFile($path, $innerPath);
         }
 
-        $this->phar->setStub($this->makeStub($include));
+        $this->phar->setStub($this->makeStub());
         $this->phar->stopBuffering();
     }
 
-    protected function makeStub($includes)
+    protected function makeStub()
     {
-        $projectName = $this->config['name'];
-        $start = $this->config['start'];
-        $stub = "<?php" . PHP_EOL;
+        $stub = '<?php' . PHP_EOL;
         $stub .= "Phar::mapPhar('{$this->buildName}');" . PHP_EOL;
-        $stub .= "const PHAR_ROOT = \"phar://{$this->buildName}\";" . PHP_EOL;
-        $stub .= "set_include_path(PHAR_ROOT);" . PHP_EOL;
+        $stub .= "\$pharRoot = \"phar://{$this->buildName}\";" . PHP_EOL;
+        $stub .= "set_include_path(\$pharRoot.'/include');" . PHP_EOL;
+        $stub .=
+"foreach (glob(\$pharRoot.'/include/*.php') as \$filename)
+{
+    include \$filename;
+}";
 
-        foreach ($includes as $include) {
-            $stub .= "include '{$include}';" . PHP_EOL;
-        }
-
-        $stub .= $start;
+        $stub .= $this->config['start'] . PHP_EOL;
         $stub .= "__HALT_COMPILER();" . PHP_EOL;
 
         return $stub;
