@@ -115,7 +115,7 @@ class Builder
         $stub .=
 "foreach (glob(\$pharRoot.'/include/*.php') as \$filename)
 {
-    include \$filename;
+    require \$filename;
 }" . PHP_EOL;
 
         $stub .= $this->config['start'] . PHP_EOL;

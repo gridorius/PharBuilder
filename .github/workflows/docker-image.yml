@@ -22,7 +22,7 @@ jobs:
       uses: actions/upload-artifact@v3
       with:
         name: compiler.phar
-        path: build/PharBuilder.phar
+        path: build/compiler.phar
     - name: Download builder
       uses: actions/download-artifact@v3
       with:
