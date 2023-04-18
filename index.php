@@ -1,8 +1,9 @@
 <?php
 
+use PharBuilder\Builder;
+
 include 'Builder.php';
 include 'Program.php';
 include 'RecursiveFinder.php';
 
-(new PharBuilder\Program())->main($argv);
-
+(new Builder($argv[1]))->build();

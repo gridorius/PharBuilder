@@ -1,3 +1,4 @@
 {
-  "name": "PharBuilder"
+  "name": "PharBuilder",
+  "start": "(new PharBuilder\\Builder($argv[1]))->build()"
 }
