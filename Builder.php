@@ -14,14 +14,17 @@ class Builder
     protected $buildDirectory;
     protected $buildName;
     protected $phar;
+    protected $depends = [];
 
-    public function __construct($folder)
+    public function __construct($folder, $buildDirectory = null)
     {
         $this->folder = $folder;
         $this->config = $this->getConfig();
 
         $this->buildName = ($this->config['outName'] ?? $this->config['name'] ?? 'build') . '.phar';
-        if ($this->config['outDir']) {
+        if ($buildDirectory) {
+            $this->buildDirectory = $buildDirectory;
+        } else if ($this->config['outDir']) {
             $this->buildDirectory = $this->folder . DIRECTORY_SEPARATOR . $this->config['outDir'];
         } else {
             $this->buildDirectory = $this->folder . '/build';
@@ -31,12 +34,22 @@ class Builder
         $this->loadIncludes();
     }
 
-    public function getConfig()
+    protected function getConfig()
     {
         return json_decode(file_get_contents($this->folder . '/build.config.json'), true);
     }
 
-    public function createPhar()
+    protected function buildDepends()
+    {
+        foreach ($this->config['depends'] as $path){
+            $subBuilder = new static($path, $this->buildDirectory);
+            $subBuilder->build();
+
+            $this->depends[] = $subBuilder->getBuildName().'.phar';
+        }
+    }
+
+    protected function createPhar()
     {
         if (!is_dir($this->buildDirectory)) {
             mkdir($this->buildDirectory, 0755, true);
@@ -48,7 +61,11 @@ class Builder
         $this->phar->startBuffering();
     }
 
-    public function loadIncludes()
+    public function getBuildName(){
+        return $this->buildName;
+    }
+
+    protected function loadIncludes()
     {
         if ($this->config['files']) {
             foreach ($this->config['files'] as $path) {
@@ -91,7 +108,7 @@ class Builder
         $this->phar->stopBuffering();
     }
 
-    public function makeStub($includes)
+    protected function makeStub($includes)
     {
         $projectName = $this->config['name'];
         $start = $this->config['start'];
