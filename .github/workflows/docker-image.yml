@@ -17,7 +17,7 @@ jobs:
     - name: Build the Docker image
       run: docker build . --file Dockerfile --tag builder:latest
     - name: run image
-      run: docker run builder:latest --name builder -v $(pwd)/build:/usr/src/myqpp/build
+      run: docker run builder:latest --name builder -v $(pwd)/build:/usr/src/builder/build
     - name: Archive production artifacts
       uses: actions/upload-artifact@v3
       with:
