@@ -14,6 +14,7 @@ class Builder
     protected $buildDirectory;
     protected $buildName;
     protected $phar;
+    protected $depends = [];
 
     public function __construct($folder, $buildDirectory = null)
     {
@@ -44,6 +45,7 @@ class Builder
         foreach ($this->config['depends'] as $path) {
             $subBuilder = new static($this->folder . DIRECTORY_SEPARATOR . $path, $this->buildDirectory);
             $subBuilder->build();
+            $this->depends[] = $subBuilder->getBuildName();
         }
     }
 
@@ -69,23 +71,28 @@ class Builder
         if ($this->config['files']) {
             foreach ($this->config['files'] as $path) {
                 $sourcePath = $this->folder . DIRECTORY_SEPARATOR . $path;
-                $filename = pathinfo($sourcePath, PATHINFO_FILENAME);
+                $filename = pathinfo($sourcePath, PATHINFO_BASENAME);
                 copy($sourcePath, $this->buildDirectory . DIRECTORY_SEPARATOR . $filename);
             }
         }
 
         if ($this->config['directories']) {
             foreach ($this->config['directories'] as $path) {
+                $target = '';
+                if (is_array($path)) {
+                    $target = $path['target'] . DIRECTORY_SEPARATOR;
+                    $path = $path['source'];
+                }
                 $directoryIterator = new RecursiveIteratorIterator(
                     new RecursiveDirectoryIterator($this->folder . DIRECTORY_SEPARATOR . $path, FilesystemIterator::SKIP_DOTS)
                 );
                 $directoryIterator->rewind();
                 while ($directoryIterator->valid()) {
-                    $innerDirPath = $this->buildDirectory . DIRECTORY_SEPARATOR . $directoryIterator->getSubPath();
+                    $innerDirPath = $this->buildDirectory . DIRECTORY_SEPARATOR . $target . $directoryIterator->getSubPath();
                     if (!is_dir($innerDirPath))
                         mkdir($innerDirPath, 0755, true);
 
-                    copy($directoryIterator->key(), $this->buildDirectory . DIRECTORY_SEPARATOR . $directoryIterator->getSubPathName());
+                    copy($directoryIterator->key(), $this->buildDirectory . DIRECTORY_SEPARATOR . $target . $directoryIterator->getSubPathName());
                     $directoryIterator->next();
                 }
             }
@@ -102,6 +109,7 @@ class Builder
         $findIterator->rewind();
 
         $navigation = [];
+        $navigationPrefix = "phar://{$this->buildName}";
 
         while ($findIterator->valid()) {
             $path = $findIterator->key();
@@ -122,7 +130,8 @@ class Builder
                     preg_match_all("/(class|interface|trait)\s+(?<name>[\w1-9_\\\\]+)/", $namespaceContent, $namespaceMatches, PREG_SET_ORDER);
 
                     foreach ($namespaceMatches as $namespaceMatch) {
-                        $navigation[$match['namespace'] . '\\' . $namespaceMatch['name']] = $innerPath;
+                        $navigation[$match['namespace'] . '\\' . $namespaceMatch['name']] =
+                            $navigationPrefix . '/' . $innerPath;
                     }
                 }
             } else {
@@ -141,30 +150,34 @@ class Builder
     protected function makeStub($navigation)
     {
         $navigationString = var_export($navigation, true);
+        $dependsString = var_export($this->depends, true);
         $stub = '<?php' . PHP_EOL;
         $stub .= "Phar::mapPhar('{$this->buildName}');" . PHP_EOL;
-        $stub .= "\$pharRoot = \"phar://{$this->buildName}\";" . PHP_EOL;
-        $stub .= "\$navigation = {$navigationString};" . PHP_EOL;
-        $stub .= "\$includedFiles = [];";
+        $stub .= "\$navigation = {$navigationString};";
+        $stub .= "\$GLOBALS['__ASSEMBLY_NAVIGATION'] = empty(\$GLOBALS['__ASSEMBLY_NAVIGATION']) ? \$navigation : array_merge(\$GLOBALS['__ASSEMBLY_NAVIGATION'], \$navigation);" . PHP_EOL;
+        $stub .= "\$GLOBALS['__INCLUDED_FILES'] = \$GLOBALS['__INCLUDED_FILES'] ?? [];" . PHP_EOL;
+        $stub .= "\$GLOBALS['__INCLUDED_ASSEMBLIES'] = \$GLOBALS['__INCLUDED_ASSEMBLIES'] ?? [];" . PHP_EOL;
+        $stub .= "\$GLOBALS['__INCLUDED_ASSEMBLIES']['{$this->buildName}']['name'] = '{$this->buildName}';" . PHP_EOL;
+        $stub .= "\$GLOBALS['__INCLUDED_ASSEMBLIES']['{$this->buildName}']['depends'] = {$dependsString};" . PHP_EOL;
+        $stub .= "\$GLOBALS['__INCLUDED_ASSEMBLIES']['{$this->buildName}']['include'] = function(){
+            \$includeIterator = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator('phar://{$this->buildName}/include', FilesystemIterator::SKIP_DOTS)
+            );
+            foreach(\$includeIterator as \$path){
+                if(empty(\$GLOBALS['__INCLUDED_FILES'][\$path->getPathname()])){
+                    require \$path->getPathname();
+                    \$GLOBALS['__INCLUDED_FILES'][\$path->getPathname()] = true;
+                }
+            }
+        };" . PHP_EOL;
 
-        $stub .= "spl_autoload_register(function (string \$entity) use (\$pharRoot, \$navigation, &\$includedFiles){
-            \$path = \$pharRoot.'/'.\$navigation[\$entity];
-            if(key_exists(\$entity, \$navigation) && empty(\$includedFiles[\$path])){
+        $stub .= "spl_autoload_register(function (string \$entity){
+            \$path = \$GLOBALS['__ASSEMBLY_NAVIGATION'][\$entity];
+            if(key_exists(\$entity, \$GLOBALS['__ASSEMBLY_NAVIGATION']) && empty(\$GLOBALS['__INCLUDED_FILES'][\$path])){
                 require \$path;
-                \$includedFiles[\$path] = true;
+                \$GLOBALS['__INCLUDED_FILES'][\$path] = true;
             }
         });" . PHP_EOL;
-
-        $stub .=
-            "\$includeIterator = new RecursiveIteratorIterator(
-    new RecursiveDirectoryIterator(\$pharRoot.'/include', FilesystemIterator::SKIP_DOTS)
-);
-foreach(\$includeIterator as \$path){
-    if(empty(\$includedFiles[\$path->getPathname()])){
-        require \$path->getPathname();
-        \$includedFiles[\$path->getPathname()] = true;
-    }
-}" . PHP_EOL;
 
         $stub .= $this->config['start'] . PHP_EOL;
         $stub .= "__HALT_COMPILER();" . PHP_EOL;

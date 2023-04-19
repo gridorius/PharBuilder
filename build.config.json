@@ -1,5 +1,5 @@
 {
   "name": "PharBuilder",
   "outName": "compiler",
-  "start": "(new PharBuilder\\Builder($argv[1]))->build();"
+  "start": "$GLOBALS['__INCLUDED_ASSEMBLIES']['compiler.phar']['include']();(new PharBuilder\\Builder($argv[1]))->build();"
 }
