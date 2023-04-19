@@ -14,7 +14,6 @@ class Builder
     protected $buildDirectory;
     protected $buildName;
     protected $phar;
-    protected $depends = [];
 
     public function __construct($folder, $buildDirectory = null)
     {
@@ -31,6 +30,7 @@ class Builder
         }
 
         $this->createPhar();
+        $this->buildDepends();
         $this->loadIncludes();
     }
 
@@ -42,10 +42,8 @@ class Builder
     protected function buildDepends()
     {
         foreach ($this->config['depends'] as $path) {
-            $subBuilder = new static($path, $this->buildDirectory);
+            $subBuilder = new static($this->folder . DIRECTORY_SEPARATOR . $path, $this->buildDirectory);
             $subBuilder->build();
-
-            $this->depends[] = $subBuilder->getBuildName() . '.phar';
         }
     }
 
@@ -96,26 +94,76 @@ class Builder
 
     public function build()
     {
-        $finder = new RecursiveFinder();
-        $pattern = $this->config['pattern'] ?? "/\.php/";
-        foreach ($finder->find($this->folder, $pattern) as $path) {
+        $pattern = $this->config['pattern'] ?? "/\.php$/";
+
+        $findIterator = new \RegexIterator(new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($this->folder, FilesystemIterator::SKIP_DOTS)
+        ), $pattern, \RecursiveRegexIterator::GET_MATCH);
+        $findIterator->rewind();
+
+        $navigation = [];
+
+        while ($findIterator->valid()) {
+            $path = $findIterator->key();
+            echo "File {$path} added;" . PHP_EOL;
             $innerPath = uniqid('include/include_') . '.php';
             $this->phar->addFile($path, $innerPath);
+
+            $content = php_strip_whitespace($path);
+            $prepared = preg_replace("/^<\?(php)?/", '', $content);
+            if (preg_match_all(
+                "/((namespace\s(?<namespace>[\w1-9_\\\\]+?))((;(?<content_t1>.+?))|(\{(?<content_t2>((?>[^{}]+)|(?7))*)\})))(?=\s*(?1)|\z)/s",
+                $prepared,
+                $matches,
+                PREG_SET_ORDER
+            )) {
+                foreach ($matches as $match) {
+                    $namespaceContent = $match['content_t1'] ?? $match['content_t2'] ?? '';
+                    preg_match_all("/(class|interface|trait)\s+(?<name>[\w1-9_\\\\]+)/", $namespaceContent, $namespaceMatches, PREG_SET_ORDER);
+
+                    foreach ($namespaceMatches as $namespaceMatch) {
+                        $navigation[$match['namespace'] . '\\' . $namespaceMatch['name']] = $innerPath;
+                    }
+                }
+            } else {
+                $rawContent .= $prepared;
+            }
+
+            $findIterator->next();
         }
 
-        $this->phar->setStub($this->makeStub());
+        $this->phar->setStub($this->makeStub($navigation));
         $this->phar->stopBuffering();
+
+        echo "Phar compiled to directory {$this->buildDirectory}" . PHP_EOL;
     }
 
-    protected function makeStub()
+    protected function makeStub($navigation)
     {
+        $navigationString = var_export($navigation, true);
         $stub = '<?php' . PHP_EOL;
         $stub .= "Phar::mapPhar('{$this->buildName}');" . PHP_EOL;
         $stub .= "\$pharRoot = \"phar://{$this->buildName}\";" . PHP_EOL;
+        $stub .= "\$navigation = {$navigationString};" . PHP_EOL;
+        $stub .= "\$includedFiles = [];";
+
+        $stub .= "spl_autoload_register(function (string \$entity) use (\$pharRoot, \$navigation, &\$includedFiles){
+            \$path = \$pharRoot.'/'.\$navigation[\$entity];
+            if(key_exists(\$entity, \$navigation) && empty(\$includedFiles[\$path])){
+                require \$path;
+                \$includedFiles[\$path] = true;
+            }
+        });" . PHP_EOL;
+
         $stub .=
-"foreach (glob(\$pharRoot.'/include/*.php') as \$filename)
-{
-    require \$filename;
+            "\$includeIterator = new RecursiveIteratorIterator(
+    new RecursiveDirectoryIterator(\$pharRoot.'/include', FilesystemIterator::SKIP_DOTS)
+);
+foreach(\$includeIterator as \$path){
+    if(empty(\$includedFiles[\$path->getPathname()])){
+        require \$path->getPathname();
+        \$includedFiles[\$path->getPathname()] = true;
+    }
 }" . PHP_EOL;
 
         $stub .= $this->config['start'] . PHP_EOL;
