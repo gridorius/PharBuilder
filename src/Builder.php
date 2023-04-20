@@ -41,20 +41,37 @@ class Builder
 
     protected function getConfig()
     {
-        return json_decode(file_get_contents($this->folder . '/build.config.json'), true);
+        if(file_exists($this->folder . '/build.config.json')) {
+            return json_decode(file_get_contents($this->folder . '/build.config.json'), true);
+        }else{
+            return [
+                'name' => pathinfo($this->folder, PATHINFO_FILENAME)
+            ];
+        }
     }
 
     protected function buildDepends()
     {
         foreach ($this->config['depends'] as $depend) {
             if (filter_var($depend, FILTER_VALIDATE_URL)) {
-                `git clone $depend /tmp/temb_build`;
-                $subBuilder = new static('/tmp/temb_build', $this->buildDirectory);
+                $dependName = implode(
+                    '',
+                    array_map(
+                        function ($item) {
+                            return ucfirst($item);
+                        },
+                        explode('/', parse_url($depend, PHP_URL_PATH)))
+                );
+
+                $dependName = preg_replace("/\.git/", '', $dependName);
+
+                echo `git clone $depend /tmp/$dependName`;
+                echo "git clone $depend /tmp/$dependName";
+                $subBuilder = new static("/tmp/{$dependName}", $this->buildDirectory);
                 $subBuilder->build();
-                unlink('/tmp/temb_build');
+                unlink("/tmp/{$dependName}");
             } else {
-                $path = $depend;
-                $subBuilder = new static($this->folder . DIRECTORY_SEPARATOR . $path, $this->buildDirectory);
+                $subBuilder = new static($this->folder . DIRECTORY_SEPARATOR . $depend, $this->buildDirectory);
                 $subBuilder->build();
             }
 
@@ -85,7 +102,10 @@ class Builder
             foreach ($this->config['files'] as $path) {
                 $sourcePath = $this->folder . DIRECTORY_SEPARATOR . $path;
                 $filename = pathinfo($sourcePath, PATHINFO_BASENAME);
-                copy($sourcePath, $this->buildDirectory . DIRECTORY_SEPARATOR . $filename);
+                $target = $this->buildDirectory . DIRECTORY_SEPARATOR . $filename;
+                if(!copy($sourcePath, $target))
+                    throw new \Exception("Не удалось копировать файл: {$sourcePath} > {$target}");
+                echo "Copy file {$sourcePath} to {$target}".PHP_EOL;
             }
         }
 
@@ -96,18 +116,26 @@ class Builder
                     $target = $path['target'] . DIRECTORY_SEPARATOR;
                     $path = $path['source'];
                 }
+
+                $fromDirectory = $this->folder . DIRECTORY_SEPARATOR . $path;
+                $targetDirectory = $this->buildDirectory . DIRECTORY_SEPARATOR . $target;
+
                 $directoryIterator = new RecursiveIteratorIterator(
-                    new RecursiveDirectoryIterator($this->folder . DIRECTORY_SEPARATOR . $path, FilesystemIterator::SKIP_DOTS)
+                    new RecursiveDirectoryIterator($fromDirectory, FilesystemIterator::SKIP_DOTS)
                 );
                 $directoryIterator->rewind();
                 while ($directoryIterator->valid()) {
-                    $innerDirPath = $this->buildDirectory . DIRECTORY_SEPARATOR . $target . $directoryIterator->getSubPath();
+                    $innerDirPath = $targetDirectory . $directoryIterator->getSubPath();
                     if (!is_dir($innerDirPath))
                         mkdir($innerDirPath, 0755, true);
 
-                    copy($directoryIterator->key(), $this->buildDirectory . DIRECTORY_SEPARATOR . $target . $directoryIterator->getSubPathName());
+                    $copyFrom = $directoryIterator->key();
+                    $copyTo = $targetDirectory . $directoryIterator->getSubPathName();
+                    if(!copy($copyFrom, $copyTo))
+                        throw new \Exception("Не удалось копировать файл: {$copyFrom} > {$copyTo}");
                     $directoryIterator->next();
                 }
+                echo "Copy directory {$fromDirectory} to {$targetDirectory}".PHP_EOL;
             }
         }
     }
@@ -119,7 +147,7 @@ class Builder
 
         if ($this->config['buildFolders']) {
             foreach ($this->config['buildFolders'] as $folder)
-                $this->buildFolder($folder, $pattern, $navigation);
+                $this->buildFolder($this->folder.DIRECTORY_SEPARATOR.$folder, $pattern, $navigation);
         } else {
             $this->buildFolder($this->folder, $pattern, $navigation);
         }
@@ -132,6 +160,8 @@ class Builder
             $this->phar->addFromString('boot.php', '<?php' . PHP_EOL . ($this->config['bootScript'] ?? ''));
         }
 
+        $this->phar->addFromString('version', $this->config['version'] ?? '0');
+
         $this->phar->setStub($this->makeStub());
         $this->phar->stopBuffering();
 
@@ -140,7 +170,7 @@ class Builder
 
     protected function buildFolder($folder, $pattern, &$navigation)
     {
-        echo "Start build folder: {$folder}".PHP_EOL;
+        echo "Start build folder: {$folder}" . PHP_EOL;
         $findIterator = new \RegexIterator(new RecursiveIteratorIterator(
             new RecursiveDirectoryIterator($folder, FilesystemIterator::SKIP_DOTS)
         ), $pattern, \RecursiveRegexIterator::GET_MATCH);
@@ -156,7 +186,7 @@ class Builder
             $findIterator->next();
         }
 
-        echo "Folder builded: {$folder}".PHP_EOL;
+        echo "Folder builded: {$folder}" . PHP_EOL;
     }
 
     protected function buildFile($path, $innerPath)

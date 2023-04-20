@@ -1,5 +1,6 @@
 {
   "name": "PharBuilder",
+  "version": "1.0.0",
   "outName": "compiler",
   "bootFile": "boot.php",
   "buildFolders": [

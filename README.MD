@@ -4,6 +4,7 @@
 {
   "name": "PackageName",
   "outName": "outPharName",
+  "version": "1.0.0",
   "outDir": "relative/path/to/out/dir",
   "depends": [
     "relative/path/to/depend",

@@ -11,6 +11,7 @@ class Assembly
 {
     protected static $_registered = [];
     protected static $_navigation = [];
+    protected static $_includedPaths = [];
     protected static $_included = [];
     protected static $_isListen = false;
 
@@ -45,20 +46,27 @@ class Assembly
 
     public static function includePhar(string $name)
     {
+        if(static::$_included[$name])
+            return;
+
         $includeIterator = new RecursiveIteratorIterator(
             new RecursiveDirectoryIterator("phar://{$name}/include", FilesystemIterator::SKIP_DOTS)
         );
         foreach ($includeIterator as $path) {
-            if (empty(static::$_included[$path->getPathname()])) {
+            if (empty(static::$_includedPaths[$path->getPathname()])) {
                 require $path->getPathname();
-                static::$_included[$path->getPathname()] = true;
+                static::$_includedPaths[$path->getPathname()] = true;
             }
         }
+        static::$_included[$name] = true;
     }
 
     public function includeWithDepends(string $name){
         $depends = static::$_registered[$name]['depends'];
         foreach ($depends as $depend){
+            if(static::$_included[$depend])
+                continue;
+
             require $depend;
             static::includeWithDepends($depend);
             static::includePhar($depend);
@@ -71,9 +79,9 @@ class Assembly
         if (!static::$_isListen) {
             spl_autoload_register(function (string $entity) {
                 $path = static::$_navigation[$entity];
-                if (key_exists($entity, static::$_navigation) && empty(static::$_included[$path])) {
+                if (key_exists($entity, static::$_navigation) && empty(static::$_includedPaths[$path])) {
                     require $path;
-                    static::$_included[$path] = true;
+                    static::$_includedPaths[$path] = true;
                 }
             });
             static::$_isListen = true;
