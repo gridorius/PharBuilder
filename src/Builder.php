@@ -94,7 +94,7 @@ class Builder
             return $this;
 
         foreach ($this->config['projectReferences'] as $reference) {
-            $subBuilder = new static($this->folder . DIRECTORY_SEPARATOR . $reference, $this->buildDirectory);
+            $subBuilder = new static($this->folder . DIRECTORY_SEPARATOR . dirname($reference), $this->buildDirectory);
             $subBuilder->build();
         }
 
