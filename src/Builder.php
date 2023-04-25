@@ -99,6 +99,7 @@ class Builder
         $this->buildPipe[] = function () {
             foreach ($this->config['projectReferences'] as $reference) {
                 $subBuilder = new static($this->folder . DIRECTORY_SEPARATOR . dirname($reference), $this->buildDirectory);
+                $this->manifest->depends[] = new Depend($subBuilder->getName(), $subBuilder->getManifest()->version);
                 $subBuilder->buildPhar();
             }
         };
