@@ -137,11 +137,17 @@ class Builder
                 $include = $resourceConfiguration['include'];
                 $exclude = $resourceConfiguration['exclude'];
 
-                $iterator = new \RegexIterator(
-                    new RecursiveIteratorIterator(
-                        new \RecursiveDirectoryIterator($this->folder, FilesystemIterator::SKIP_DOTS)
-                    ), $include
-                );
+                try {
+                    $iterator = new \RegexIterator(
+                        new RecursiveIteratorIterator(
+                            new \RecursiveDirectoryIterator($this->folder, FilesystemIterator::SKIP_DOTS)
+                        ), $include
+                    );
+                } catch (\Exception $ex) {
+                   echo "Directory {$this->folder} regex {$include}";
+                   throw $ex;
+                }
+
                 foreach ($iterator as $fileInfo) {
                     $sourcePath = $iterator->key();
                     foreach ($exclude as $ex)
@@ -151,7 +157,7 @@ class Builder
                     $innerPath = str_replace($this->folder, '', $sourcePath);
                     $target = $this->buildDirectory . $innerPath;
                     $targetDir = dirname($target);
-                    if(!is_dir($targetDir))
+                    if (!is_dir($targetDir))
                         mkdir($targetDir, 0755, true);
 
                     if (!copy($sourcePath, $target))
@@ -180,7 +186,7 @@ class Builder
             $this->buildLibFolder($this->folder, "/{$pattern}/");
         }
 
-        foreach ($this->buildPipe as $build){
+        foreach ($this->buildPipe as $build) {
             $build();
         }
 
