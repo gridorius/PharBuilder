@@ -17,6 +17,7 @@ class Builder
     protected $phar;
     protected $navigationPrefix;
     protected $manifest;
+    protected $buildPipe = [];
 
     public function __construct($folder, $buildDirectory = null)
     {
@@ -32,10 +33,6 @@ class Builder
         $this->navigationPrefix = "phar://{$this->buildName}";
 
         $this->buildDirectory = $buildDirectory ?? 'out';
-
-        if (!is_dir($this->buildDirectory)) {
-            mkdir($this->buildDirectory, 0755, true);
-        }
     }
 
     public function getName()
@@ -79,6 +76,10 @@ class Builder
 
     protected function createPharFile()
     {
+        if (!is_dir($this->buildDirectory)) {
+            mkdir($this->buildDirectory, 0755, true);
+        }
+
         $pharPath = $this->buildDirectory . DIRECTORY_SEPARATOR . $this->buildName;
 
         if (file_exists($pharPath))
@@ -93,10 +94,12 @@ class Builder
         if (!key_exists('projectReferences', $this->config))
             return $this;
 
-        foreach ($this->config['projectReferences'] as $reference) {
-            $subBuilder = new static($this->folder . DIRECTORY_SEPARATOR . dirname($reference), $this->buildDirectory);
-            $subBuilder->build();
-        }
+        $this->buildPipe[] = function () {
+            foreach ($this->config['projectReferences'] as $reference) {
+                $subBuilder = new static($this->folder . DIRECTORY_SEPARATOR . dirname($reference), $this->buildDirectory);
+                $subBuilder->buildPhar();
+            }
+        };
 
         return $this;
     }
@@ -106,11 +109,14 @@ class Builder
         if (!key_exists('packageReferences', $this->config))
             return $this;
 
-        foreach ($this->config['packageReferences'] as $package => $version) {
-            $this->manifest->depends[] = new Depend($package, $version);
-        }
+        $this->buildPipe[] = function () {
+            foreach ($this->config['packageReferences'] as $package => $version) {
+                $this->manifest->depends[] = new Depend($package, $version);
+            }
 
-        // todo: Реализовать
+            // todo: Реализовать
+        };
+
         return $this;
     }
 
@@ -119,36 +125,38 @@ class Builder
         if (!key_exists('embeddedResources', $this->config))
             return $this;
 
-        foreach ($this->config['embeddedResources'] as $resourceConfiguration) {
-            $include = $resourceConfiguration['include'];
-            $exclude = $resourceConfiguration['exclude'];
+        $this->buildPipe[] = function () {
+            foreach ($this->config['embeddedResources'] as $resourceConfiguration) {
+                $include = $resourceConfiguration['include'];
+                $exclude = $resourceConfiguration['exclude'];
 
-            $iterator = new \RegexIterator(
-                new RecursiveIteratorIterator(
-                    new \RecursiveDirectoryIterator($this->folder, FilesystemIterator::SKIP_DOTS)
-                ), $include
-            );
-            foreach ($iterator as $fileInfo) {
-                $sourcePath = $iterator->key();
-                foreach ($exclude as $ex)
-                    if (preg_match($ex, $sourcePath))
-                        continue 2;
+                $iterator = new \RegexIterator(
+                    new RecursiveIteratorIterator(
+                        new \RecursiveDirectoryIterator($this->folder, FilesystemIterator::SKIP_DOTS)
+                    ), $include
+                );
+                foreach ($iterator as $fileInfo) {
+                    $sourcePath = $iterator->key();
+                    foreach ($exclude as $ex)
+                        if (preg_match($ex, $sourcePath))
+                            continue 2;
 
-                $innerPath = str_replace($this->folder, '', $sourcePath);
-                $target = $this->buildDirectory . $innerPath;
-                if (!copy($sourcePath, $target))
-                    throw new \Exception("Не удалось копировать файл: {$sourcePath} > {$target}");
+                    $innerPath = str_replace($this->folder, '', $sourcePath);
+                    $target = $this->buildDirectory . $innerPath;
+                    if (!copy($sourcePath, $target))
+                        throw new \Exception("Не удалось копировать файл: {$sourcePath} > {$target}");
 
-                $this->manifest->files[] = $innerPath;
+                    $this->manifest->files[] = $innerPath;
 
-                echo "Copy file {$sourcePath} to {$target}" . PHP_EOL;
+                    echo "Copy file {$sourcePath} to {$target}" . PHP_EOL;
+                }
             }
-        }
+        };
 
         return $this;
     }
 
-    public function build(): self
+    public function buildPhar(): self
     {
         $this->createPharFile();
 
@@ -161,8 +169,11 @@ class Builder
             $this->buildLibFolder($this->folder, "/{$pattern}/");
         }
 
-        $this->buildLibFile(__DIR__ . '/Assembly.php', 'Assembly.php');
+        foreach ($this->buildPipe as $build){
+            $build();
+        }
 
+        $this->buildLibFile(__DIR__ . '/Assembly.php', 'Assembly.php');
         $this->createManifestFile();
         $this->createAutoloadFile();
 

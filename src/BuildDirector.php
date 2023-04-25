@@ -17,7 +17,7 @@ class BuildDirector
             ->buildProjectReferences()
             ->buildPackageReferences()
             ->buildResources()
-            ->build();
+            ->buildPhar();
     }
 
     public function buildPackage(): Builder{
@@ -25,6 +25,6 @@ class BuildDirector
             ->builder
             ->buildProjectReferences()
             ->buildResources()
-            ->build();
+            ->buildPhar();
     }
 }
