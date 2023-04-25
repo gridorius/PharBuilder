@@ -32,6 +32,10 @@ class Builder
         $this->navigationPrefix = "phar://{$this->buildName}";
 
         $this->buildDirectory = $buildDirectory ?? 'out';
+
+        if (!is_dir($this->buildDirectory)) {
+            mkdir($this->buildDirectory, 0755, true);
+        }
     }
 
     public function getName()
@@ -75,10 +79,6 @@ class Builder
 
     protected function createPharFile()
     {
-        if (!is_dir($this->buildDirectory)) {
-            mkdir($this->buildDirectory, 0755, true);
-        }
-
         $pharPath = $this->buildDirectory . DIRECTORY_SEPARATOR . $this->buildName;
 
         if (file_exists($pharPath))
