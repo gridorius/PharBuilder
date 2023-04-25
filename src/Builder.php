@@ -145,6 +145,10 @@ class Builder
 
                     $innerPath = str_replace($this->folder, '', $sourcePath);
                     $target = $this->buildDirectory . $innerPath;
+                    $targetDir = dirname($target);
+                    if(!is_dir($targetDir))
+                        mkdir($targetDir, 0755, true);
+
                     if (!copy($sourcePath, $target))
                         throw new \Exception("Не удалось копировать файл: {$sourcePath} > {$target}");
 
