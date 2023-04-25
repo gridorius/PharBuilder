@@ -135,7 +135,8 @@ class Builder
         $this->buildPipe[] = function () {
             foreach ($this->config['embeddedResources'] as $resourceConfiguration) {
                 $include = $resourceConfiguration['include'];
-                $exclude = $resourceConfiguration['exclude'];
+                $exclude = $resourceConfiguration['exclude'] ?? [];
+                $exclude[] = "/\.proj\.json$/";
 
                 try {
                     $iterator = new \RegexIterator(
@@ -144,8 +145,8 @@ class Builder
                         ), $include
                     );
                 } catch (\Exception $ex) {
-                   echo "Directory {$this->folder} regex {$include}";
-                   throw $ex;
+                    echo "Directory {$this->folder} regex {$include}";
+                    throw $ex;
                 }
 
                 foreach ($iterator as $fileInfo) {
@@ -190,7 +191,6 @@ class Builder
             $build();
         }
 
-        $this->buildLibFile(__DIR__ . '/Assembly.php', 'Assembly.php');
         $this->createManifestFile();
         $this->createAutoloadFile();
 
@@ -265,6 +265,9 @@ class Builder
 
     protected function createAutoloadFile()
     {
+        if (count($this->manifest->types) == 0)
+            return;
+
         $autoloadString =
             <<< AUTOLOAD_STRING
         <?php
@@ -283,17 +286,20 @@ class Builder
     protected function makeStub(): string
     {
         $executable = '';
+
+        if (count($this->manifest->types) > 0) {
+            $executable .= "require '{$this->navigationPrefix}/autoload.php';" . PHP_EOL;
+        }
         if ($this->config['entrypoint']) {
             [$class, $method] = $this->config['entrypoint'];
-            $executable = "{$class}::{$method}(\$argv)";
+            $executable .= "{$class}::{$method}(\$argv);" . PHP_EOL;
         }
 
         return
             <<<STUB_CODE
         <?php
         Phar::mapPhar('{$this->buildName}');
-        require '{$this->navigationPrefix}/autoload.php';
-        {$executable};
+        {$executable}
         __HALT_COMPILER();
         STUB_CODE;
     }
