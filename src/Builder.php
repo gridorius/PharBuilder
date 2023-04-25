@@ -39,15 +39,18 @@ class Builder
         return $this->name;
     }
 
-    public function getBuildDirectory(){
+    public function getBuildDirectory()
+    {
         return $this->buildDirectory;
     }
 
-    public function getManifest(): Manifest{
+    public function getManifest(): Manifest
+    {
         return $this->manifest;
     }
 
-    public function getConfig(){
+    public function getConfig()
+    {
         return $this->config;
     }
 
@@ -78,8 +81,8 @@ class Builder
 
         $pharPath = $this->buildDirectory . DIRECTORY_SEPARATOR . $this->buildName;
 
-        if(file_exists($pharPath))
-          unlink($pharPath);
+        if (file_exists($pharPath))
+            unlink($pharPath);
 
         $this->phar = new Phar($pharPath);
         $this->phar->startBuffering();
@@ -103,7 +106,7 @@ class Builder
         if (!key_exists('packageReferences', $this->config))
             return $this;
 
-        foreach ($this->config['packageReferences'] as $package => $version){
+        foreach ($this->config['packageReferences'] as $package => $version) {
             $this->manifest->depends[] = new Depend($package, $version);
         }
 
@@ -128,11 +131,11 @@ class Builder
             foreach ($iterator as $fileInfo) {
                 $sourcePath = $iterator->key();
                 foreach ($exclude as $ex)
-                    if(preg_match($ex, $sourcePath))
-                        continue;
+                    if (preg_match($ex, $sourcePath))
+                        continue 2;
 
                 $innerPath = str_replace($this->folder, '', $sourcePath);
-                $target = $this->buildDirectory.$innerPath;
+                $target = $this->buildDirectory . $innerPath;
                 if (!copy($sourcePath, $target))
                     throw new \Exception("Не удалось копировать файл: {$sourcePath} > {$target}");
 
@@ -180,8 +183,20 @@ class Builder
 
         while ($findIterator->valid()) {
             $path = $findIterator->key();
-            $innerPath = $findIterator->getSubPathName();
-            $this->buildLibFile($path, $innerPath);
+            if ($this->config['exclude']) {
+                foreach ($this->config['exclude'] as $pattern) {
+                    if (preg_match($pattern, $path)) {
+                        $findIterator->next();
+                        continue 2;
+                    }
+
+                    $innerPath = $findIterator->getSubPathName();
+                    $this->buildLibFile($path, $innerPath);
+                }
+            } else {
+                $innerPath = $findIterator->getSubPathName();
+                $this->buildLibFile($path, $innerPath);
+            }
             $findIterator->next();
         }
 

@@ -20,6 +20,9 @@
   ],
   "entrypoint": ["Entrypoint\\Class", "entrypointMethod"],
   "pattern": "/include files pattern/",
+  "exclude": [
+    "/\/dirname\/.+/"
+  ],
   "folders": [
     "relative/folder/path",
     {
