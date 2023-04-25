@@ -9,77 +9,68 @@ use RecursiveIteratorIterator;
 
 class Builder
 {
+    protected $name;
     protected $folder;
     protected $config;
     protected $buildDirectory;
     protected $buildName;
     protected $phar;
-    protected $depends = [];
     protected $navigationPrefix;
-    protected $navigation = [];
+    protected $manifest;
 
     public function __construct($folder, $buildDirectory = null)
     {
+        $this->manifest = new Manifest();
         $this->folder = $folder;
-        $this->config = $this->getConfig();
+        $this->config = $this->getProjectConfig();
 
-        $this->buildName = ($this->config['outName'] ?? $this->config['name'] ?? 'build') . '.phar';
+        $this->manifest->name = $this->config['name'];
+        $this->manifest->version = $this->config['version'];
+
+        $this->name = $this->config['name'];
+        $this->buildName = $this->config['name'] . '.phar';
         $this->navigationPrefix = "phar://{$this->buildName}";
 
-        if ($buildDirectory) {
-            $this->buildDirectory = $buildDirectory;
-        } else if ($this->config['outDir']) {
-            $this->buildDirectory = $this->folder . DIRECTORY_SEPARATOR . $this->config['outDir'];
-        } else {
-            $this->buildDirectory = $this->folder . '/build';
-        }
-
-        $this->createPhar();
-        $this->buildDepends();
-        $this->loadIncludes();
+        $this->buildDirectory = $buildDirectory ?? 'out';
     }
 
-    protected function getConfig()
+    public function getName()
     {
-        if(file_exists($this->folder . '/build.config.json')) {
-            return json_decode(file_get_contents($this->folder . '/build.config.json'), true);
-        }else{
-            return [
-                'name' => pathinfo($this->folder, PATHINFO_FILENAME)
-            ];
-        }
+        return $this->name;
     }
 
-    protected function buildDepends()
+    public function getBuildDirectory(){
+        return $this->buildDirectory;
+    }
+
+    public function getManifest(): Manifest{
+        return $this->manifest;
+    }
+
+    public function getConfig(){
+        return $this->config;
+    }
+
+    protected function getProjectConfig()
     {
-        foreach ($this->config['depends'] as $depend) {
-            if (filter_var($depend, FILTER_VALIDATE_URL)) {
-                $dependName = implode(
-                    '',
-                    array_map(
-                        function ($item) {
-                            return ucfirst($item);
-                        },
-                        explode('/', parse_url($depend, PHP_URL_PATH)))
-                );
+        $iterator = new FilesystemIterator($this->folder);
+        $regexpIterator = new \RegexIterator($iterator, "/proj\.json$/", \RegexIterator::MATCH);
+        $procConfigs = [];
 
-                $dependName = preg_replace("/\.git/", '', $dependName);
-
-                echo `git clone $depend /tmp/$dependName`;
-                echo "git clone $depend /tmp/$dependName";
-                $subBuilder = new static("/tmp/{$dependName}", $this->buildDirectory);
-                $subBuilder->build();
-                unlink("/tmp/{$dependName}");
-            } else {
-                $subBuilder = new static($this->folder . DIRECTORY_SEPARATOR . $depend, $this->buildDirectory);
-                $subBuilder->build();
-            }
-
-            $this->depends[] = $subBuilder->getBuildName();
+        foreach ($regexpIterator as $info) {
+            $procConfigs[] = $regexpIterator->key();
         }
+
+        if (count($procConfigs) == 0)
+            throw new \Exception('proj.json file not found');
+
+        if (count($procConfigs) > 1)
+            throw new \Exception('Only 1 proj.json can exist');
+
+        return json_decode(file_get_contents($procConfigs[0]), true);
     }
 
-    protected function createPhar()
+    protected function createPharFile()
     {
         if (!is_dir($this->buildDirectory)) {
             mkdir($this->buildDirectory, 0755, true);
@@ -87,88 +78,99 @@ class Builder
 
         $pharPath = $this->buildDirectory . DIRECTORY_SEPARATOR . $this->buildName;
 
-        $this->phar = new Phar($pharPath, 0, $this->buildName);
+        if(file_exists($pharPath))
+          unlink($pharPath);
+
+        $this->phar = new Phar($pharPath);
         $this->phar->startBuffering();
     }
 
-    public function getBuildName()
+    public function buildProjectReferences(): self
     {
-        return $this->buildName;
+        if (!key_exists('projectReferences', $this->config))
+            return $this;
+
+        foreach ($this->config['projectReferences'] as $reference) {
+            $subBuilder = new static($this->folder . DIRECTORY_SEPARATOR . $reference, $this->buildDirectory);
+            $subBuilder->build();
+        }
+
+        return $this;
     }
 
-    protected function loadIncludes()
+    public function buildPackageReferences()
     {
-        if ($this->config['files']) {
-            foreach ($this->config['files'] as $path) {
-                $sourcePath = $this->folder . DIRECTORY_SEPARATOR . $path;
-                $filename = pathinfo($sourcePath, PATHINFO_BASENAME);
-                $target = $this->buildDirectory . DIRECTORY_SEPARATOR . $filename;
-                if(!copy($sourcePath, $target))
+        if (!key_exists('packageReferences', $this->config))
+            return $this;
+
+        foreach ($this->config['packageReferences'] as $package => $version){
+            $this->manifest->depends[] = new Depend($package, $version);
+        }
+
+        // todo: Реализовать
+        return $this;
+    }
+
+    public function buildResources()
+    {
+        if (!key_exists('embeddedResources', $this->config))
+            return $this;
+
+        foreach ($this->config['embeddedResources'] as $resourceConfiguration) {
+            $include = $resourceConfiguration['include'];
+            $exclude = $resourceConfiguration['exclude'];
+
+            $iterator = new \RegexIterator(
+                new RecursiveIteratorIterator(
+                    new \RecursiveDirectoryIterator($this->folder, FilesystemIterator::SKIP_DOTS)
+                ), $include
+            );
+            foreach ($iterator as $fileInfo) {
+                $sourcePath = $iterator->key();
+                foreach ($exclude as $ex)
+                    if(preg_match($ex, $sourcePath))
+                        continue;
+
+                $innerPath = str_replace($this->folder, '', $sourcePath);
+                $target = $this->buildDirectory.$innerPath;
+                if (!copy($sourcePath, $target))
                     throw new \Exception("Не удалось копировать файл: {$sourcePath} > {$target}");
-                echo "Copy file {$sourcePath} to {$target}".PHP_EOL;
+
+                $this->manifest->files[] = $innerPath;
+
+                echo "Copy file {$sourcePath} to {$target}" . PHP_EOL;
             }
         }
 
-        if ($this->config['directories']) {
-            foreach ($this->config['directories'] as $path) {
-                $target = '';
-                if (is_array($path)) {
-                    $target = $path['target'] . DIRECTORY_SEPARATOR;
-                    $path = $path['source'];
-                }
-
-                $fromDirectory = $this->folder . DIRECTORY_SEPARATOR . $path;
-                $targetDirectory = $this->buildDirectory . DIRECTORY_SEPARATOR . $target;
-
-                $directoryIterator = new RecursiveIteratorIterator(
-                    new RecursiveDirectoryIterator($fromDirectory, FilesystemIterator::SKIP_DOTS)
-                );
-                $directoryIterator->rewind();
-                while ($directoryIterator->valid()) {
-                    $innerDirPath = $targetDirectory . $directoryIterator->getSubPath();
-                    if (!is_dir($innerDirPath))
-                        mkdir($innerDirPath, 0755, true);
-
-                    $copyFrom = $directoryIterator->key();
-                    $copyTo = $targetDirectory . $directoryIterator->getSubPathName();
-                    if(!copy($copyFrom, $copyTo))
-                        throw new \Exception("Не удалось копировать файл: {$copyFrom} > {$copyTo}");
-                    $directoryIterator->next();
-                }
-                echo "Copy directory {$fromDirectory} to {$targetDirectory}".PHP_EOL;
-            }
-        }
+        return $this;
     }
 
-    public function build()
+    public function build(): self
     {
-        $pattern = $this->config['pattern'] ?? "/\.php$/";
-        $navigation = [];
+        $this->createPharFile();
+
+        $pattern = $this->config['pattern'] ?? "\.php$";
 
         if ($this->config['buildFolders']) {
             foreach ($this->config['buildFolders'] as $folder)
-                $this->buildFolder($this->folder.DIRECTORY_SEPARATOR.$folder, $pattern, $navigation);
+                $this->buildLibFolder($this->folder . DIRECTORY_SEPARATOR . $folder, "/{$pattern}/");
         } else {
-            $this->buildFolder($this->folder, $pattern, $navigation);
+            $this->buildLibFolder($this->folder, "/{$pattern}/");
         }
 
-        $this->buildFile(__DIR__ . '/Assembly.php', 'Assembly.php');
+        $this->buildLibFile(__DIR__ . '/Assembly.php', 'Assembly.php');
 
-        if ($this->config['bootFile']) {
-            $this->buildFile($this->folder . DIRECTORY_SEPARATOR . $this->config['bootFile'], 'boot.php');
-        } else {
-            $this->phar->addFromString('boot.php', '<?php' . PHP_EOL . ($this->config['bootScript'] ?? ''));
-        }
-
-        $this->phar->addFromString('version', $this->config['version'] ?? '0');
+        $this->createManifestFile();
+        $this->createAutoloadFile();
 
         $this->phar->setStub($this->makeStub());
         $this->phar->stopBuffering();
 
         echo "Phar compiled to directory {$this->buildDirectory}" . PHP_EOL;
+        return $this;
     }
 
-    protected function buildFolder($folder, $pattern, &$navigation)
+    protected function buildLibFolder($folder, $pattern)
     {
         echo "Start build folder: {$folder}" . PHP_EOL;
         $findIterator = new \RegexIterator(new RecursiveIteratorIterator(
@@ -178,64 +180,78 @@ class Builder
 
         while ($findIterator->valid()) {
             $path = $findIterator->key();
-            $innerPath = 'include/' . $findIterator->getSubPathName();
-            $this->phar->addFile($path, $innerPath);
-
-            $this->buildFile($path, $innerPath);
-
+            $innerPath = $findIterator->getSubPathName();
+            $this->buildLibFile($path, $innerPath);
             $findIterator->next();
         }
 
         echo "Folder builded: {$folder}" . PHP_EOL;
     }
 
-    protected function buildFile($path, $innerPath)
+    protected function buildLibFile($path, $innerPath)
     {
-        $this->phar->addFile($path, $innerPath);
-
         $content = php_strip_whitespace($path);
         $prepared = preg_replace("/^<\?(php)?/", '', $content);
         if (preg_match_all(
-            "/((namespace\s(?<namespace>[\w1-9_\\\\]+?))((;(?<content_t1>.+?))|(\{(?<content_t2>((?>[^{}]+)|(?7))*)\})))(?=\s*(?1)|\z)/s",
+            Constants::NAMESPACE_REGEX,
             $prepared,
             $matches,
             PREG_SET_ORDER
         )) {
             foreach ($matches as $match) {
                 $namespaceContent = $match['content_t1'] ?? $match['content_t2'] ?? '';
-                preg_match_all("/(class|interface|trait)\s+(?<name>[\w1-9_\\\\]+)/", $namespaceContent, $namespaceMatches, PREG_SET_ORDER);
+                preg_match_all(Constants::ENTITY_REGEX, $namespaceContent, $namespaceMatches, PREG_SET_ORDER);
 
                 foreach ($namespaceMatches as $namespaceMatch) {
-                    $this->navigation[$match['namespace'] . '\\' . $namespaceMatch['name']] =
-                        $this->navigationPrefix . '/' . $innerPath;
+                    $entity = $match['namespace'] . '\\' . $namespaceMatch['name'];
+
+                    $innerPath = 'lib/' . $innerPath;
+                    $this->manifest->types[$entity] = $innerPath;
+
+                    $this->phar->addFile($path, $innerPath);
+                    echo "File {$path} added to library as {$innerPath};" . PHP_EOL;
                 }
             }
         }
-        echo "File {$path} added;" . PHP_EOL;
+    }
+
+    protected function createManifestFile()
+    {
+        $this->phar->addFromString('manifest.json', json_encode($this->manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+    }
+
+    protected function createAutoloadFile()
+    {
+        $autoloadString =
+            <<< AUTOLOAD_STRING
+        <?php
+        \$navigation = json_decode(file_get_contents('{$this->navigationPrefix}/manifest.json'), true)['types'];
+        spl_autoload_register(function (string \$entity) use(\$navigation) {
+            \$path = \$navigation[\$entity];
+            if (key_exists(\$entity, \$navigation)) {
+                require __DIR__.'/'.\$path;
+            }
+        });
+        AUTOLOAD_STRING;
+
+        $this->phar->addFromString('autoload.php', $autoloadString);
     }
 
     protected function makeStub(): string
     {
-        $navigationString = var_export($this->navigation, true);
-        $dependsString = var_export($this->depends, true);
-        $stub = <<<STUB_CODE
-<?php
-Phar::mapPhar('{$this->buildName}');
-if(!class_exists(PharBuilder\Assembly::class))
-    require '{$this->navigationPrefix}/Assembly.php';
- 
-PharBuilder\Assembly::registerPhar(
-    '{$this->buildName}',
-    $dependsString,
-    $navigationString
-);
+        $executable = '';
+        if ($this->config['entrypoint']) {
+            [$class, $method] = $this->config['entrypoint'];
+            $executable = "{$class}::{$method}(\$argv)";
+        }
 
-PharBuilder\Assembly::startListenAutoload();
-
-require '{$this->navigationPrefix}/boot.php';
-__HALT_COMPILER();
-STUB_CODE;
-
-        return $stub;
+        return
+            <<<STUB_CODE
+        <?php
+        Phar::mapPhar('{$this->buildName}');
+        require '{$this->navigationPrefix}/autoload.php';
+        {$executable};
+        __HALT_COMPILER();
+        STUB_CODE;
     }
 }

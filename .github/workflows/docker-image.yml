@@ -1,29 +1,22 @@
 name: Docker Image CI
-
 on:
   push:
-    branches: [ "master" ]
+    tags:
+      - v*
   pull_request:
-    branches: [ "master" ]
+    tags:
+      - v*
 
 jobs:
-
   build:
-
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v3
-    - name: Build the Docker image
-      run: docker build . --file Dockerfile --tag builder:latest
-    - name: run image
-      run: docker run --rm --name builder -v $(pwd)/build:/usr/src/builder/build builder:latest
-    - name: Archive production artifacts
-      uses: actions/upload-artifact@v3
-      with:
-        name: compiler.phar
-        path: build/compiler.phar
-    - name: Download builder
-      uses: actions/download-artifact@v3
-      with:
-        name: compiler.phar
+      - uses: actions/checkout@v3
+      - name: Login in docker
+        run: docker login -u ${{ secrets.DOCKER_HUB_USERNAME }} -p ${{ secrets.DOCKER_HUB_TOKEN }}
+      - name: Build the Docker image
+        run: docker build -t gridorius/phnet:latest -t gridorius/phnet:${{github.ref_name}} .
+      - name: Push docker image
+        run: |
+          docker push gridorius/phnet:latest
+          docker push gridorius/phnet:${{github.ref_name}}

@@ -3,16 +3,23 @@
 ```json
 {
   "name": "PackageName",
-  "outName": "outPharName",
   "version": "1.0.0",
-  "outDir": "relative/path/to/out/dir",
-  "depends": [
-    "relative/path/to/depend",
-    "https://github.com/project_path.git"
+  "projectReferences": [
+    "relative/path/to/depend/project.json"
   ],
-  "bootScript": "boot script",
+  "packageReferences": {
+    "PackageName": "1.23"
+  },
+  "embeddedResources": [
+    {
+      "include": "path\/.",
+      "exclude": [
+        
+      ]
+    }
+  ],
+  "entrypoint": ["Entrypoint\\Class", "entrypointMethod"],
   "pattern": "/include files pattern/",
-  "bootFile": "path to boot file",
   "folders": [
     "relative/folder/path",
     {

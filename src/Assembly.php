@@ -73,18 +73,4 @@ class Assembly
         }
         static::includePhar($name);
     }
-
-    public static function startListenAutoload()
-    {
-        if (!static::$_isListen) {
-            spl_autoload_register(function (string $entity) {
-                $path = static::$_navigation[$entity];
-                if (key_exists($entity, static::$_navigation) && empty(static::$_includedPaths[$path])) {
-                    require $path;
-                    static::$_includedPaths[$path] = true;
-                }
-            });
-            static::$_isListen = true;
-        }
-    }
 }

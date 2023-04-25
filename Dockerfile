@@ -1,5 +1,6 @@
 FROM php:7.4-cli
 COPY . /usr/src/builder
 COPY php.ini /usr/local/etc/php
+COPY phnet /bin
 WORKDIR /usr/src/builder
-ENTRYPOINT php -r "include 'src/Builder.php'; (new PharBuilder\Builder('/usr/src/builder'))->build();"
+RUN php build.php
