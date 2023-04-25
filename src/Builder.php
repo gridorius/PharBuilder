@@ -3,6 +3,7 @@
 namespace PharBuilder;
 
 use FilesystemIterator;
+use MongoDB\BSON\Timestamp;
 use Phar;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
@@ -80,6 +81,7 @@ class Builder
             mkdir($this->buildDirectory, 0755, true);
         }
 
+        $this->buildDirectory = (new \SplFileInfo($this->buildDirectory))->getRealPath();
         $pharPath = $this->buildDirectory . DIRECTORY_SEPARATOR . $this->buildName;
 
         if (file_exists($pharPath))
