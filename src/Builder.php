@@ -20,11 +20,11 @@ class Builder
     protected $manifest;
     protected $buildPipe = [];
 
-    public function __construct($folder, $buildDirectory = null)
+    public function __construct(string $configPath, $buildDirectory = null)
     {
         $this->manifest = new Manifest();
-        $this->folder = $folder;
-        $this->config = $this->getProjectConfig();
+        $this->folder = (new \SplFileInfo(dirname($configPath)))->getRealPath();
+        $this->config = json_decode(file_get_contents($configPath), true);
 
         $this->manifest->name = $this->config['name'];
         $this->manifest->version = $this->config['version'];
@@ -51,37 +51,16 @@ class Builder
         return $this->manifest;
     }
 
-    public function getConfig()
-    {
-        return $this->config;
-    }
-
-    protected function getProjectConfig()
-    {
-        $iterator = new FilesystemIterator($this->folder);
-        $regexpIterator = new \RegexIterator($iterator, "/proj\.json$/", \RegexIterator::MATCH);
-        $procConfigs = [];
-
-        foreach ($regexpIterator as $info) {
-            $procConfigs[] = $regexpIterator->key();
-        }
-
-        if (count($procConfigs) == 0)
-            throw new \Exception('proj.json file not found');
-
-        if (count($procConfigs) > 1)
-            throw new \Exception('Only 1 proj.json can exist');
-
-        return json_decode(file_get_contents($procConfigs[0]), true);
-    }
-
-    protected function createPharFile()
-    {
+    protected function createBuildDirectory(){
         if (!is_dir($this->buildDirectory)) {
             mkdir($this->buildDirectory, 0755, true);
         }
 
         $this->buildDirectory = (new \SplFileInfo($this->buildDirectory))->getRealPath();
+    }
+
+    protected function createPharFile()
+    {
         $pharPath = $this->buildDirectory . DIRECTORY_SEPARATOR . $this->buildName;
 
         if (file_exists($pharPath))
@@ -91,18 +70,21 @@ class Builder
         $this->phar->startBuffering();
     }
 
-    public function buildProjectReferences(): self
+    public function buildProjectReferences(bool $needBuildPackages = false): self
     {
         if (!key_exists('projectReferences', $this->config))
             return $this;
 
-        $this->buildPipe[] = function () {
+        $this->buildPipe[] = function () use ($needBuildPackages) {
             foreach ($this->config['projectReferences'] as $reference) {
-                $subBuilder = new static($this->folder . DIRECTORY_SEPARATOR . dirname($reference), $this->buildDirectory);
+                $subBuilder = new static($this->folder . DIRECTORY_SEPARATOR . $reference, $this->buildDirectory);
                 $this->manifest->depends[] = new Depend($subBuilder->getName(), $subBuilder->getManifest()->version);
+                if ($needBuildPackages)
+                    $subBuilder
+                        ->buildPackageReferences();
+
                 $subBuilder
                     ->buildProjectReferences()
-                    ->buildPackageReferences()
                     ->buildResources()
                     ->buildPhar();
             }
@@ -121,7 +103,13 @@ class Builder
                 $this->manifest->depends[] = new Depend($package, $version);
             }
 
-            // todo: Реализовать
+            $path = PackageManager::findLocally($package, $version);
+
+            if (!$path)
+                throw new \Exception("Package {$package} {$version} not found locally");
+
+            PackageManager::unpackToBuild($path, $this->buildDirectory);
+            echo "Package {$package} {$version} added to build" . PHP_EOL;
         };
 
         return $this;
@@ -176,6 +164,7 @@ class Builder
 
     public function buildPhar(): self
     {
+        $this->createBuildDirectory();
         $this->createPharFile();
 
         $pattern = $this->config['pattern'] ?? "\.php$";
@@ -209,22 +198,28 @@ class Builder
         ), $pattern, \RecursiveRegexIterator::GET_MATCH);
         $findIterator->rewind();
 
-        while ($findIterator->valid()) {
-            $path = $findIterator->key();
-            if ($this->config['exclude']) {
-                foreach ($this->config['exclude'] as $pattern) {
-                    if (preg_match($pattern, $path)) {
-                        $findIterator->next();
-                        continue 2;
-                    }
+        $withoutExcludeHandler = function ($findIterator, $path) {
+            $innerPath = $findIterator->getSubPathName();
+            $this->buildLibFile($path, $innerPath);
+        };
 
-                    $innerPath = $findIterator->getSubPathName();
-                    $this->buildLibFile($path, $innerPath);
+        $withExcludeHandler = function ($findIterator, $path) {
+            foreach ($this->config['exclude'] as $pattern) {
+                if (preg_match($pattern, $path)) {
+                    $findIterator->next();
+                    return;
                 }
-            } else {
+
                 $innerPath = $findIterator->getSubPathName();
                 $this->buildLibFile($path, $innerPath);
             }
+        };
+
+        $handler = key_exists('exclude', $this->config) ? $withExcludeHandler : $withoutExcludeHandler;
+
+        while ($findIterator->valid()) {
+            $path = $findIterator->key();
+            $handler($findIterator, $path);
             $findIterator->next();
         }
 
@@ -290,7 +285,7 @@ class Builder
         if (count($this->manifest->types) > 0) {
             $executable .= "require '{$this->navigationPrefix}/autoload.php';" . PHP_EOL;
         }
-        if ($this->config['entrypoint']) {
+        if (key_exists('entrypoint', $this->config)) {
             [$class, $method] = $this->config['entrypoint'];
             $executable .= "{$class}::{$method}(\$argv);" . PHP_EOL;
         }

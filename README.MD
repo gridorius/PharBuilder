@@ -7,6 +7,9 @@
   "projectReferences": [
     "relative/path/to/depend/project.json"
   ],
+  "packageSources": [
+    "https://phnet-registry"
+  ],
   "packageReferences": {
     "PackageName": "1.23"
   },

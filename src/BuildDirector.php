@@ -14,7 +14,7 @@ class BuildDirector
     public function buildRelease(): Builder{
         return $this
             ->builder
-            ->buildProjectReferences()
+            ->buildProjectReferences(true)
             ->buildPackageReferences()
             ->buildResources()
             ->buildPhar();
