@@ -49,12 +49,57 @@ class PackageManager
         return null;
     }
 
-    public static function findLocally($name, $version): ?string
+    public function loadDepends($depends){
+        foreach ($depends as $depend){
+            [$name, $version] = array_shift($depends);
+
+            $localPackage = static::findLocally($name, $version);
+            if ($localPackage) {
+                echo "Package {$name}, version {$localPackage['version']} found locally" . PHP_EOL;
+                $localPath = $localPackage['path'];
+            }else{
+                $foundPackage = $this->findPackage($name, $version);
+                if($foundPackage){
+                    $localPath = static::getPackagePath($name, $foundPackage['version']);
+                    echo PHP_EOL;
+                    static::downloadPackage($foundPackage['path'], $localPath, function ($full, $loaded) use ($name, $foundPackage) {
+                        $piece = round(($loaded / $full) * 20);
+                        $progress = str_pad(str_pad('', $piece, '+'), 20, '-');
+                        echo "Download package {$name}, version {$foundPackage['version']}: [$progress]\r";
+                    });
+                    echo PHP_EOL;
+                }
+            }
+
+            if (!$localPath)
+                throw new \Exception('package not found');
+
+            $manifestPath = "phar://{$localPath}/package.manifest.json";
+
+            if ($manifestRaw = file_get_contents($manifestPath)) {
+                $manifest = json_decode($manifestRaw, true);
+                foreach ($manifest['packageReferences'] as $reference)
+                    $depends[] = [$reference['name'], $reference['version']];
+
+                $this->loadDepends($depends);
+            } else {
+                throw new \Exception("Failed read package manifest in {$manifestPath}");
+            }
+        }
+    }
+
+    public static function findLocally($name, $version): ?array
     {
         $packagePath = static::$packagesPath . $name . '/' . $version . '.phar';
         $found = glob($packagePath);
-        if (count($found) > 0)
-            return reset($found);
+        if (count($found) > 0){
+            $path = reset($found);
+            preg_match("/\/(?<version>([^\/]+))\.phar$/", $path, $matches);
+            return [
+                'version' => $matches['version'],
+                'path' => $path
+            ];
+        }
 
         return null;
     }
@@ -65,7 +110,7 @@ class PackageManager
         string $packageFile,
         string $source,
         string $password,
-        bool $isPublic = true
+        bool   $isPublic = true
     )
     {
         $post = [
@@ -92,8 +137,8 @@ class PackageManager
         if (is_null($result))
             throw new \Exception('Result not converted');
 
-        if($error = $result['error'])
-            throw new \Exception($error);
+        if (!empty($result['error']))
+            throw new \Exception($result['error']);
 
         return $result['PackageId'];
     }
@@ -104,17 +149,43 @@ class PackageManager
         $data->extractTo($buildPath);
     }
 
-    public static function getPackageData($path)
+    public static function downloadPackage($sourcePath, $targetPath, \Closure $onIteration = null)
     {
-        return file_get_contents($path);
+        $context = stream_context_create( array(
+            'http'=>array(
+                'timeout' => 2.0
+            )
+        ));
+
+        $from = fopen($sourcePath, 'r', false, $context);
+        $to = fopen($targetPath, 'w');
+        $loaded = 0;
+
+        $headers = [];
+        foreach (stream_get_meta_data($from)['wrapper_data'] as $item){
+            [$header, $value] = explode(':', $item, 2);
+            $headers[$header] = $value;
+        }
+
+        $size = $headers['Content-Length'];
+
+        while (!feof($from)) {
+            $data = fgets($from, 10000);
+            $loaded += strlen($data);
+            $onIteration($size, $loaded);
+            fwrite($to, $data);
+            if($loaded == $size)
+                break;
+        }
+
+        fclose($from);
+        fclose($to);
     }
 
-    public static function savePackage($name, $version, $data): string
+    public static function getPackagePath($name, $version): string
     {
         $packagePath = static::$packagesPath . $name;
         mkdir($packagePath, 0755, true);
-        file_put_contents($packagePath . '/' . $version . '.phar', $data);
-
         return $packagePath . '/' . $version . '.phar';
     }
 }

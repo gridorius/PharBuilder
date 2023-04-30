@@ -8,5 +8,5 @@ class Manifest
     public $version = '';
     public $types = [];
     public $files = [];
-    public $depends = [];
+    public $pharDepends = [];
 }

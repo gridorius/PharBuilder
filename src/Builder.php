@@ -3,7 +3,6 @@
 namespace PharBuilder;
 
 use FilesystemIterator;
-use MongoDB\BSON\Timestamp;
 use Phar;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
@@ -15,13 +14,19 @@ class Builder
     protected $config;
     protected $buildDirectory;
     protected $buildName;
+    /** @var Phar */
     protected $phar;
     protected $navigationPrefix;
     protected $manifest;
     protected $buildPipe = [];
 
+    protected $isIncluded = false;
+
     public function __construct(string $configPath, $buildDirectory = null)
     {
+        if (!is_file($configPath))
+            throw new \Exception("File {$configPath} not found");
+
         $this->manifest = new Manifest();
         $this->folder = (new \SplFileInfo(dirname($configPath)))->getRealPath();
         $this->config = json_decode(file_get_contents($configPath), true);
@@ -51,12 +56,20 @@ class Builder
         return $this->manifest;
     }
 
-    protected function createBuildDirectory(){
+    protected function createBuildDirectory()
+    {
         if (!is_dir($this->buildDirectory)) {
             mkdir($this->buildDirectory, 0755, true);
         }
 
         $this->buildDirectory = (new \SplFileInfo($this->buildDirectory))->getRealPath();
+    }
+
+    public function setParent(Phar $phar, Manifest $manifest)
+    {
+        $this->phar = $phar;
+        $this->manifest = $manifest;
+        $this->isIncluded = true;
     }
 
     protected function createPharFile()
@@ -78,7 +91,12 @@ class Builder
         $this->buildPipe[] = function () use ($needBuildPackages) {
             foreach ($this->config['projectReferences'] as $reference) {
                 $subBuilder = new static($this->folder . DIRECTORY_SEPARATOR . $reference, $this->buildDirectory);
-                $this->manifest->depends[] = new Depend($subBuilder->getName(), $subBuilder->getManifest()->version);
+                if ((!empty($this->config['executable']) && $this->config['executable']) || $this->isIncluded) {
+                    $subBuilder->setParent($this->phar, $this->manifest);
+                } else {
+                    $this->manifest->pharDepends[] = new Depend($subBuilder->getName(), $subBuilder->getManifest()->version);
+                }
+
                 if ($needBuildPackages)
                     $subBuilder
                         ->buildPackageReferences();
@@ -100,15 +118,15 @@ class Builder
 
         $this->buildPipe[] = function () {
             foreach ($this->config['packageReferences'] as $package => $version) {
-                $this->manifest->depends[] = new Depend($package, $version);
+                $this->manifest->pharDepends[] = new Depend($package, $version);
             }
 
-            $path = PackageManager::findLocally($package, $version);
+            $localPackage = PackageManager::findLocally($package, $version);
 
-            if (!$path)
+            if (!$localPackage)
                 throw new \Exception("Package {$package} {$version} not found locally");
 
-            PackageManager::unpackToBuild($path, $this->buildDirectory);
+            PackageManager::unpackToBuild($localPackage['path'], $this->buildDirectory);
             echo "Package {$package} {$version} added to build" . PHP_EOL;
         };
 
@@ -164,8 +182,10 @@ class Builder
 
     public function buildPhar(): self
     {
-        $this->createBuildDirectory();
-        $this->createPharFile();
+        if (!$this->phar) {
+            $this->createBuildDirectory();
+            $this->createPharFile();
+        }
 
         $pattern = $this->config['pattern'] ?? "\.php$";
 
@@ -180,13 +200,16 @@ class Builder
             $build();
         }
 
-        $this->createManifestFile();
-        $this->createAutoloadFile();
+        if (!$this->isIncluded)
+            $this->createManifest();
 
         $this->phar->setStub($this->makeStub());
-        $this->phar->stopBuffering();
 
-        echo "Phar compiled to directory {$this->buildDirectory}" . PHP_EOL;
+        if (!$this->isIncluded) {
+            $this->phar->stopBuffering();
+            echo "Phar compiled to directory {$this->buildDirectory}" . PHP_EOL;
+        }
+
         return $this;
     }
 
@@ -228,6 +251,7 @@ class Builder
 
     protected function buildLibFile($path, $innerPath)
     {
+        $subPrefix = $this->isIncluded ? $this->name . '/' : '';
         $content = php_strip_whitespace($path);
         $prepared = preg_replace("/^<\?(php)?/", '', $content);
         if (preg_match_all(
@@ -243,7 +267,7 @@ class Builder
                 foreach ($namespaceMatches as $namespaceMatch) {
                     $entity = $match['namespace'] . '\\' . $namespaceMatch['name'];
 
-                    $innerPath = 'lib/' . $innerPath;
+                    $innerPath = 'lib/' . $subPrefix . $innerPath;
                     $this->manifest->types[$entity] = $innerPath;
 
                     $this->phar->addFile($path, $innerPath);
@@ -253,42 +277,25 @@ class Builder
         }
     }
 
-    protected function createManifestFile()
+    protected function createManifest()
     {
         $this->phar->addFromString('manifest.json', json_encode($this->manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-    }
-
-    protected function createAutoloadFile()
-    {
-        if (count($this->manifest->types) == 0)
-            return;
-
-        $autoloadString =
-            <<< AUTOLOAD_STRING
-        <?php
-        \$navigation = json_decode(file_get_contents('{$this->navigationPrefix}/manifest.json'), true)['types'];
-        spl_autoload_register(function (string \$entity) use(\$navigation) {
-            \$path = \$navigation[\$entity];
-            if (key_exists(\$entity, \$navigation)) {
-                require __DIR__.'/'.\$path;
-            }
-        });
-        AUTOLOAD_STRING;
-
-        $this->phar->addFromString('autoload.php', $autoloadString);
     }
 
     protected function makeStub(): string
     {
         $executable = '';
 
-        if (count($this->manifest->types) > 0) {
-            $executable .= "require '{$this->navigationPrefix}/autoload.php';" . PHP_EOL;
+        if (!empty($this->config['executable']) && $this->config['executable']) {
+            $this->phar->addFromString('index.php', Templates::getAutoload($this->buildName));
+            $executable .= "require '{$this->navigationPrefix}/index.php';";
         }
+
         if (key_exists('entrypoint', $this->config)) {
             [$class, $method] = $this->config['entrypoint'];
             $executable .= "{$class}::{$method}(\$argv);" . PHP_EOL;
         }
+
 
         return
             <<<STUB_CODE

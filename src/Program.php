@@ -25,14 +25,22 @@ class Program
                 default:
                     throw new \Exception('Command not found');
             }
-        }catch (\Exception $ex){
-            echo $ex->getMessage().PHP_EOL;
+        } catch (\Exception $ex) {
+            fwrite(STDERR, $ex->getMessage().PHP_EOL);
+            exit(1);
         }
     }
 
     protected static function build($argv)
     {
-        $options = getopt('o:');
+        $options = new Options($argv);
+        $options->required([
+            'o'
+        ]);
+
+        $options->parse();
+        $options = $options->getOptions();
+
         $director = new BuildDirector(ProjectConfig::findConfig('.'), $options['o']);
         $director->buildRelease();
     }
@@ -51,7 +59,7 @@ class Program
         if (!file_exists($pharPath))
             throw new \Exception("{$pharPath} not found");
 
-        file_put_contents($indexPath . '/index.php', IndexTemplate::get($argv[3]));
+        file_put_contents($indexPath . '/index.php', Templates::getIndex($argv[3]));
     }
 
     protected static function restore($argv)
@@ -63,45 +71,26 @@ class Program
         $sources = $config['packageSources'];
         $manager = new PackageManager($sources);
 
-        while (count($depends) > 0) {
-            [$name, $version] = array_shift($depends);
-
-            if (PackageManager::findLocally($name, $version))
-                continue;
-
-            echo "Package {$name} {$version} not found locally, find in sources" .PHP_EOL;
-
-            if ($foundData = $manager->findPackage($name, $version)) {
-                echo "Package {$name} {$foundData['version']} foind in {$foundData['source']}";
-                $localPath = PackageManager::savePackage($name, $foundData['version'], PackageManager::getPackageData($foundData['path']));
-                $manifestPath = "phar://{$localPath}/manifest.json";
-                if ($manifestRaw = file_get_contents($manifestPath)) {
-                    $manifest = json_decode($manifestRaw, true);
-                    foreach ($manifest['depends'] as $depend)
-                        $depends[] = [$depend['name'], $depend['version']];
-                } else {
-                    throw new \Exception("Failed read manifest in {$manifestPath}");
-                }
-            } else {
-                throw new \Exception('package not found');
-            }
-        }
+        $manager->loadDepends($depends);
     }
 
     protected static function package($argv)
     {
-        $options = getopt('s:', [
+        $options = new Options($argv);
+        $options->required([
+            's', 'p'
+        ], [
             'private'
         ]);
+
+        $options->parse();
+        $options = $options->getOptions();
 
         if (empty($options['s']))
             throw new \Exception('Source not settled');
 
         if (empty($options['p']))
             throw new \Exception('Password not settled');
-
-        echo 'Enter password: ';
-        $password = fgets(STDIN);
 
         echo 'Start build package' . PHP_EOL;
 
@@ -110,15 +99,21 @@ class Program
         $director = new BuildDirector(ProjectConfig::findConfig('.'), $buildDir);
         $builder = $director->buildPackage();
 
-        echo 'Wrap package'. PHP_EOL;;
+        $packageConfig = ProjectConfig::getConfig('.');
+        $packageManifest = [
+            'name' => $packageConfig['name'],
+            'version' => $packageConfig['version'],
+            'packageReferences' => $packageConfig['packageReferences'] ?? []
+        ];
 
-        $manifest = $builder->getManifest();
+        echo 'Wrap package' . PHP_EOL;;
+
         $tempname = uniqid('pack_') . '.phar';
         $packagePath = "/tmp/{$tempname}";
         $packagePhar = new \Phar($packagePath);
         $packagePhar->startBuffering();
         $packagePhar->buildFromDirectory($builder->getBuildDirectory());
-        $packagePhar->addFromString('manifest.json', json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+        $packagePhar->addFromString('package.manifest.json', json_encode($packageManifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
         $packagePhar->stopBuffering();
 
         echo 'Start uploading' . PHP_EOL;
@@ -127,11 +122,11 @@ class Program
         rmdir($builder->getBuildDirectory());
 
         $packageId = PackageManager::uploadPackage(
-            $manifest->name,
-            $manifest->version,
+            $packageManifest['name'],
+            $packageManifest['version'],
             $packagePath,
             $options['s'],
-            $password,
+            $options['p'],
             !key_exists('private', $options)
         );
         unlink($packagePath);

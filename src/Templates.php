@@ -2,9 +2,9 @@
 
 namespace PharBuilder;
 
-class IndexTemplate
+class Templates
 {
-    public static function get(string $pharName)
+    public static function getIndex(string $pharName)
     {
         return <<<TEMPLATE_STRING
 <?php
@@ -17,12 +17,12 @@ error_reporting(E_WARNING | E_ERROR);
 \$manifests = [];
 
 \$manifests[] = \$mainManifest = json_decode(file_get_contents("phar://{\$innerPhar}/manifest.json"), true);
-\$additional = \$mainManifest['depends'];
+\$additional = \$mainManifest['pharDepends'];
 
 while (count(\$additional) > 0) {
     \$depend = array_shift(\$additional);
     \$manifests[] = \$dependManifest = json_decode(file_get_contents("phar://{\$depend['name']}.phar/manifest.json"), true);
-    \$additional = array_merge(\$additional, \$dependManifest['depends']);
+    \$additional = array_merge(\$additional, \$dependManifest['pharDepends']);
 }
 
 \$types = [];
@@ -50,6 +50,31 @@ foreach (\$types as \$type => \$path) {
 }
 
 require "{\$main['name']}.phar";
+TEMPLATE_STRING;
+    }
+
+    public static function getAutoload(string $pharName)
+    {
+        return <<<TEMPLATE_STRING
+<?php
+
+\$innerPhar = '{$pharName}';
+\$innerPharPath = "phar://{\$innerPhar}";
+\$manifest = \$mainManifest = json_decode(file_get_contents("phar://{\$innerPhar}/manifest.json"), true);
+
+\$types = [];
+foreach (\$manifest['types'] as \$type => \$path) {
+    \$types[\$type] = "{\$innerPharPath}/{\$path}";
+}
+
+spl_autoload_register(function (string \$entity) use (\$types) {
+    if (key_exists(\$entity, \$types))
+        require \$types[\$entity];
+}, false, true);
+
+foreach (\$types as \$type) {
+    class_exists(\$type);
+}
 TEMPLATE_STRING;
     }
 }

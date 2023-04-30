@@ -4,6 +4,7 @@
 {
   "name": "PackageName",
   "version": "1.0.0",
+  "executable": false,
   "projectReferences": [
     "relative/path/to/depend/project.json"
   ],
