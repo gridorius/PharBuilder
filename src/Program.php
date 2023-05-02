@@ -6,8 +6,12 @@ use SplFileInfo;
 
 class Program
 {
+    /** @var PhnetService */
+    protected static $service;
+
     public static function main($argv = [])
     {
+        static::$service = new PhnetService();
         try {
             switch ($argv[1]) {
                 case 'build':
@@ -34,15 +38,22 @@ class Program
     protected static function build($argv)
     {
         $options = new Options($argv);
-        $options->required([
-            'o'
-        ]);
+        $options->required(['o']);
+        $options->single(['i', 'e']);
 
         $options->parse();
         $options = $options->getOptions();
 
-        $director = new BuildDirector(ProjectConfig::findConfig('.'), $options['o']);
-        $director->buildRelease();
+        $buildDirectory = $options['o'] ?? 'out';
+
+        $director = new BuildDirector(ProjectConfig::findConfig('.'), $buildDirectory);
+        if(!empty($options['e']))
+            $director->executable();
+
+        $builder = $director->buildRelease();
+
+        if(!empty($options['i']))
+            static::$service->makeIndexFile($buildDirectory, $builder->getBuildName());
     }
 
     protected static function makeIndexFile($argv)
@@ -53,13 +64,7 @@ class Program
         if (!$argv[3])
             throw new \Exception('Phar file not settled');
 
-        $indexPath = (new SplFileInfo($argv[2]))->getRealPath();
-        $pharPath = $indexPath . '/' . $argv[3];
-
-        if (!file_exists($pharPath))
-            throw new \Exception("{$pharPath} not found");
-
-        file_put_contents($indexPath . '/index.php', Templates::getIndex($argv[3]));
+        static::$service->makeIndexFile($argv[2], $argv[3]);
     }
 
     protected static function restore($argv)

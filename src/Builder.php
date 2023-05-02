@@ -20,6 +20,7 @@ class Builder
     protected $manifest;
     protected $buildPipe = [];
 
+    protected $isExecutable = false;
     protected $isIncluded = false;
 
     public function __construct(string $configPath, $buildDirectory = null)
@@ -31,19 +32,27 @@ class Builder
         $this->folder = (new \SplFileInfo(dirname($configPath)))->getRealPath();
         $this->config = json_decode(file_get_contents($configPath), true);
 
-        $this->manifest->name = $this->config['name'];
+        $this->name = $this->manifest->name = $this->config['name'];
         $this->manifest->version = $this->config['version'];
 
-        $this->name = $this->config['name'];
         $this->buildName = $this->config['name'] . '.phar';
         $this->navigationPrefix = "phar://{$this->buildName}";
 
-        $this->buildDirectory = $buildDirectory ?? 'out';
+        $this->buildDirectory = $buildDirectory;
     }
 
     public function getName()
     {
         return $this->name;
+    }
+
+    public function executable(){
+        $this->isExecutable = true;
+        return $this;
+    }
+
+    public function getBuildName(): string{
+        return $this->buildName;
     }
 
     public function getBuildDirectory()
@@ -91,7 +100,7 @@ class Builder
         $this->buildPipe[] = function () use ($needBuildPackages) {
             foreach ($this->config['projectReferences'] as $reference) {
                 $subBuilder = new static($this->folder . DIRECTORY_SEPARATOR . $reference, $this->buildDirectory);
-                if ((!empty($this->config['executable']) && $this->config['executable']) || $this->isIncluded) {
+                if ($this->isExecutable || $this->isIncluded) {
                     $subBuilder->setParent($this->phar, $this->manifest);
                 } else {
                     $this->manifest->pharDepends[] = new Depend($subBuilder->getName(), $subBuilder->getManifest()->version);
@@ -286,7 +295,7 @@ class Builder
     {
         $executable = '';
 
-        if (!empty($this->config['executable']) && $this->config['executable']) {
+        if (!empty($this->isExecutable)){
             $this->phar->addFromString('index.php', Templates::getAutoload($this->buildName));
             $executable .= "require '{$this->navigationPrefix}/index.php';";
         }

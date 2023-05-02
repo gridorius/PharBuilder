@@ -5,10 +5,15 @@ namespace PharBuilder;
 class BuildDirector
 {
     protected $builder;
+    protected $isExecutable = false;
 
     public function __construct($folder, $buildDirectory = null)
     {
         $this->builder = new Builder($folder, $buildDirectory);
+    }
+
+    public function executable(){
+        $this->builder->executable();
     }
 
     public function buildRelease(): Builder{

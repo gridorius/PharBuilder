@@ -48,7 +48,7 @@ class Options
                     continue;
                 }
 
-                foreach ($found as $char){
+                foreach (str_split($found) as $char){
                     if(in_array($char, $this->_single))
                         $options[$char] = empty($options[$char]) ? $options[$char] + 1 : 1;
                 }

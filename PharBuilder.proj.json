@@ -2,7 +2,6 @@
   "name": "PharBuilder",
   "version": "1.0.0",
   "entrypoint": ["PharBuilder\\Program", "main"],
-  "executable": true,
   "buildFolders": [
     "src"
   ]
