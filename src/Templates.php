@@ -16,12 +16,12 @@ error_reporting(E_WARNING | E_ERROR);
 
 \$manifests = [];
 
-\$manifests[] = \$mainManifest = json_decode(file_get_contents("phar://{\$innerPhar}/manifest.json"), true);
+\$manifests[] = \$mainManifest = json_decode(file_get_contents('phar://'.__DIR__."/{\$innerPhar}/manifest.json"), true);
 \$additional = \$mainManifest['pharDepends'];
 
 while (count(\$additional) > 0) {
     \$depend = array_shift(\$additional);
-    \$manifests[] = \$dependManifest = json_decode(file_get_contents("phar://{\$depend['name']}.phar/manifest.json"), true);
+    \$manifests[] = \$dependManifest = json_decode(file_get_contents('phar://'.__DIR__."/{\$depend['name']}.phar/manifest.json"), true);
     \$additional = array_merge(\$additional, \$dependManifest['pharDepends']);
 }
 
@@ -40,10 +40,6 @@ spl_autoload_register(function (string \$entity) use (\$types) {
 }, false, true);
 
 \$main = array_shift(\$manifests);
-
-foreach (array_reverse(\$manifests) as \$manifest) {
-    require "{\$manifest['name']}.phar";
-}
 
 foreach (\$types as \$type => \$path) {
     class_exists(\$type);

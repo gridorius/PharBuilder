@@ -33,7 +33,7 @@ class Builder
         $this->config = json_decode(file_get_contents($configPath), true);
 
         $this->name = $this->manifest->name = $this->config['name'];
-        $this->manifest->version = $this->config['version'];
+        $this->manifest->version = $this->config['version'] ?? '0.0.0';
 
         $this->buildName = $this->config['name'] . '.phar';
         $this->navigationPrefix = "phar://{$this->buildName}";
@@ -148,10 +148,12 @@ class Builder
             return $this;
 
         $this->buildPipe[] = function () {
+            $resources = [];
             foreach ($this->config['embeddedResources'] as $resourceConfiguration) {
                 $include = $resourceConfiguration['include'];
                 $exclude = $resourceConfiguration['exclude'] ?? [];
                 $exclude[] = "/\.proj\.json$/";
+                $exclude[] = "/".preg_quote($this->buildDirectory, '/')."/";
 
                 try {
                     $iterator = new \RegexIterator(
@@ -173,16 +175,22 @@ class Builder
                     $innerPath = str_replace($this->folder, '', $sourcePath);
                     $target = $this->buildDirectory . $innerPath;
                     $targetDir = dirname($target);
-                    if (!is_dir($targetDir))
-                        mkdir($targetDir, 0755, true);
-
-                    if (!copy($sourcePath, $target))
-                        throw new \Exception("Не удалось копировать файл: {$sourcePath} > {$target}");
-
-                    $this->manifest->files[] = $innerPath;
-
-                    echo "Copy file {$sourcePath} to {$target}" . PHP_EOL;
+                    $resources[] = [$targetDir, $sourcePath, $target];
                 }
+            }
+
+            foreach ($resources as $resource){
+                [$targetDir, $sourcePath, $target] = $resource;
+
+                if (!is_dir($targetDir))
+                    mkdir($targetDir, 0755, true);
+
+                if (!copy($sourcePath, $target))
+                    throw new \Exception("Не удалось копировать файл: {$sourcePath} > {$target}");
+
+                $this->manifest->files[] = $innerPath;
+
+                echo "Copy file {$sourcePath} to {$target}" . PHP_EOL;
             }
         };
 
@@ -198,7 +206,7 @@ class Builder
 
         $pattern = $this->config['pattern'] ?? "\.php$";
 
-        if ($this->config['buildFolders']) {
+        if (isset($this->config['buildFolders'])) {
             foreach ($this->config['buildFolders'] as $folder)
                 $this->buildLibFolder($this->folder . DIRECTORY_SEPARATOR . $folder, "/{$pattern}/");
         } else {

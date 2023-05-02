@@ -8,6 +8,7 @@ class Program
 {
     /** @var PhnetService */
     protected static $service;
+    protected static $loginDir = '/etc/phnet/login';
 
     public static function main($argv = [])
     {
@@ -16,6 +17,9 @@ class Program
             switch ($argv[1]) {
                 case 'build':
                     static::build($argv);
+                    break;
+                case 'login':
+                    static::login($argv);
                     break;
                 case 'make:index':
                     static::makeIndexFile($argv);
@@ -38,15 +42,14 @@ class Program
     protected static function build($argv)
     {
         $options = new Options($argv);
-        $options->required(['o']);
+        $options->required(['o', 'p']);
         $options->single(['i', 'e']);
 
         $options->parse();
         $options = $options->getOptions();
 
         $buildDirectory = $options['o'] ?? 'out';
-
-        $director = new BuildDirector(ProjectConfig::findConfig('.'), $buildDirectory);
+        $director = new BuildDirector(ProjectConfig::findConfig(empty($options['p']) ? '.' : $options['p']), $buildDirectory);
         if(!empty($options['e']))
             $director->executable();
 
@@ -83,7 +86,7 @@ class Program
     {
         $options = new Options($argv);
         $options->required([
-            's', 'p'
+            's'
         ], [
             'private'
         ]);
@@ -94,8 +97,12 @@ class Program
         if (empty($options['s']))
             throw new \Exception('Source not settled');
 
-        if (empty($options['p']))
-            throw new \Exception('Password not settled');
+        $loginPath = static::$loginDir.'/'.md5($options['s']).'.json';
+        if(!is_file($loginPath)){
+            throw new \Exception('unauthorized');
+        }
+
+        $loginData = json_decode(file_get_contents($loginPath), true)['password'];
 
         echo 'Start build package' . PHP_EOL;
 
@@ -131,10 +138,38 @@ class Program
             $packageManifest['version'],
             $packagePath,
             $options['s'],
-            $options['p'],
+            $loginData['password'],
             !key_exists('private', $options)
         );
         unlink($packagePath);
         echo "Package uploaded #{$packageId}" . PHP_EOL;;
+    }
+
+    protected static function login($argv){
+        $options = new Options($argv);
+        $options->required([
+            'p', 's'
+        ]);
+
+        $options->parse();
+        $options = $options->getOptions();
+
+        if (empty($options['s']))
+            throw new \Exception('Source not settled');
+
+        if (empty($options['p']))
+            throw new \Exception('Password not settled');
+
+        $password = $options['p'];
+        $source = $options['s'];
+
+        if(!is_dir(static::$loginDir))
+            mkdir(static::$loginDir, 0755, true);
+
+        $filePath = static::$loginDir.'/'.md5($source).'.json';
+        file_put_contents($filePath, json_encode([
+            'source' => $source,
+            'password' => $password
+        ]));
     }
 }
