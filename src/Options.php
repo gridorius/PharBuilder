@@ -4,7 +4,6 @@ namespace PharBuilder;
 
 class Options
 {
-    protected $argv;
     protected $_single = [];
     protected $_required = [];
     protected $_longSingle = [];
@@ -12,11 +11,6 @@ class Options
 
     protected $command;
     protected $options;
-
-    public function __construct(array $argv)
-    {
-        $this->argv = $argv;
-    }
 
     public function single($short, $long = []){
         $this->_single = $short;
@@ -28,11 +22,11 @@ class Options
         $this->_longRequired = $long;
     }
 
-    public function parse(){
+    public function parse($argv){
         $command = [];
         $options = [];
 
-        $iterator = new \ArrayIterator($this->argv);
+        $iterator = new \ArrayIterator($argv);
         $iterator->rewind();
 
         foreach ($iterator as $item){

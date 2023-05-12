@@ -41,11 +41,11 @@ class Program
 
     protected static function build($argv)
     {
-        $options = new Options($argv);
+        $options = new Options();
         $options->required(['o', 'p']);
         $options->single(['i', 'e']);
 
-        $options->parse();
+        $options->parse($argv);
         $options = $options->getOptions();
 
         $buildDirectory = $options['o'] ?? 'out';
@@ -73,25 +73,22 @@ class Program
     protected static function restore($argv)
     {
         $config = ProjectConfig::getConfig('.');
-        $depends = array_map(function ($package, $version) {
-            return [$package, $version];
-        }, array_keys($config['packageReferences']), $config['packageReferences']);
         $sources = $config['packageSources'];
         $manager = new PackageManager($sources);
 
-        $manager->loadDepends($depends);
+        $manager->loadDepends($config['packageReferences']);
     }
 
     protected static function package($argv)
     {
-        $options = new Options($argv);
+        $options = new Options();
         $options->required([
             's'
         ], [
             'private'
         ]);
 
-        $options->parse();
+        $options->parse($argv);
         $options = $options->getOptions();
 
         if (empty($options['s']))
@@ -139,19 +136,20 @@ class Program
             $packagePath,
             $options['s'],
             $loginData['password'],
-            !key_exists('private', $options)
+            !key_exists('private', $options),
+            $packageManifest['packageReferences']
         );
         unlink($packagePath);
         echo "Package uploaded #{$packageId}" . PHP_EOL;;
     }
 
     protected static function login($argv){
-        $options = new Options($argv);
+        $options = new Options();
         $options->required([
             'p', 's'
         ]);
 
-        $options->parse();
+        $options->parse($argv);
         $options = $options->getOptions();
 
         if (empty($options['s']))

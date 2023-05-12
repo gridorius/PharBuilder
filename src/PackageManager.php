@@ -42,7 +42,8 @@ class PackageManager
             return [
                 'source' => $source,
                 'path' => $source . "/package/{$package['PackageId']}/",
-                'version' => $package['PackageVersion']
+                'version' => $package['PackageVersion'],
+                'references' => $package['PackageReferences']
             ];
         }
 
@@ -50,17 +51,28 @@ class PackageManager
     }
 
     public function loadDepends($depends){
-        foreach ($depends as $depend){
-            [$name, $version] = array_shift($depends);
-
+        foreach ($depends as $name => $version){
             $localPackage = static::findLocally($name, $version);
+            $subDepends = [];
             if ($localPackage) {
                 echo "Package {$name}, version {$localPackage['version']} found locally" . PHP_EOL;
                 $localPath = $localPackage['path'];
+
+                $manifestPath = "phar://{$localPath}/package.manifest.json";
+
+                if ($manifestRaw = file_get_contents($manifestPath)) {
+                    $manifest = json_decode($manifestRaw, true);
+                    $subDepends = $manifest['packageReferences'];
+                } else {
+                    throw new \Exception("Failed read package manifest in {$manifestPath}");
+                }
             }else{
                 $foundPackage = $this->findPackage($name, $version);
                 if($foundPackage){
                     $localPath = static::getPackagePath($name, $foundPackage['version']);
+
+                    $subDepends = $foundPackage['references'];
+
                     echo PHP_EOL;
                     static::downloadPackage($foundPackage['path'], $localPath, function ($full, $loaded) use ($name, $foundPackage) {
                         $piece = round(($loaded / $full) * 20);
@@ -74,17 +86,7 @@ class PackageManager
             if (!$localPath)
                 throw new \Exception('package not found');
 
-            $manifestPath = "phar://{$localPath}/package.manifest.json";
-
-            if ($manifestRaw = file_get_contents($manifestPath)) {
-                $manifest = json_decode($manifestRaw, true);
-                foreach ($manifest['packageReferences'] as $reference)
-                    $depends[] = [$reference['name'], $reference['version']];
-
-                $this->loadDepends($depends);
-            } else {
-                throw new \Exception("Failed read package manifest in {$manifestPath}");
-            }
+            $this->loadDepends($subDepends);
         }
     }
 
@@ -110,7 +112,8 @@ class PackageManager
         string $packageFile,
         string $source,
         string $password,
-        bool   $isPublic = true
+        bool   $isPublic = true,
+        array $references = []
     )
     {
         $post = [
@@ -118,7 +121,8 @@ class PackageManager
             'name' => $packageName,
             'version' => $packageVersion,
             'password' => $password,
-            'isPublic' => $isPublic
+            'isPublic' => $isPublic,
+            'references' => $references
         ];
 
         $ch = curl_init();
