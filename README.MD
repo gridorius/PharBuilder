@@ -1,4 +1,4 @@
-### build.config.json 
+### build.config.json
 
 ```json
 {
@@ -13,15 +13,18 @@
   "packageReferences": {
     "PackageName": "1.23"
   },
-  "embeddedResources": [
+  "files": [
     {
-      "include": "path\/.",
+      "include": "/path\/./",
       "exclude": [
-        
+        "/path\/.+\\.css/"
       ]
     }
   ],
-  "entrypoint": ["Entrypoint\\Class", "entrypointMethod"],
+  "entrypoint": [
+    "Entrypoint\\Class",
+    "entrypointMethod"
+  ],
   "pattern": "/include files pattern/",
   "exclude": [
     "/\/dirname\/.+/"
@@ -33,11 +36,28 @@
       "target": "target/path"
     }
   ],
-  "files": [
-    "relative/file/path.ext"
-  ],
   "buildFolders": [
     "relative/build/folder/path"
+  ],
+  "targets": [
+    {
+      "name": "compile scss",
+      "tasks": [
+        {
+          "type": "Command",
+          "command": "scss file.scss $(buildDirectory)/css/style.css"
+        },
+        {
+          "type": "Copy",
+          "from": "path",
+          "to": "path"
+        },
+        {
+          "type": "Delete",
+          "path": "path/to/file.extension"
+        }
+      ]
+    }
   ]
 }
 ```

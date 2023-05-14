@@ -4,6 +4,7 @@ namespace PharBuilder;
 
 use FilesystemIterator;
 use Phar;
+use PharBuilder\Tasks\TaskBase;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 
@@ -22,6 +23,7 @@ class Builder
 
     protected $isExecutable = false;
     protected $isIncluded = false;
+    protected $_withPackages = true;
 
     public function __construct(string $configPath, $buildDirectory = null)
     {
@@ -44,6 +46,11 @@ class Builder
     public function getName()
     {
         return $this->name;
+    }
+
+    public function withoutPackages(){
+        $this->_withPackages = false;
+        return $this;
     }
 
     public function executable(){
@@ -92,12 +99,12 @@ class Builder
         $this->phar->startBuffering();
     }
 
-    public function buildProjectReferences(bool $needBuildPackages = false): self
+    public function buildProjectReferences(): self
     {
         if (!key_exists('projectReferences', $this->config))
             return $this;
 
-        $this->buildPipe[] = function () use ($needBuildPackages) {
+        $this->buildPipe[] = function () {
             foreach ($this->config['projectReferences'] as $reference) {
                 $subBuilder = new static($this->folder . DIRECTORY_SEPARATOR . $reference, $this->buildDirectory);
                 if ($this->isExecutable || $this->isIncluded) {
@@ -106,13 +113,13 @@ class Builder
                     $this->manifest->pharDepends[] = new Depend($subBuilder->getName(), $subBuilder->getManifest()->version);
                 }
 
-                if ($needBuildPackages)
+                if ($this->_withPackages)
                     $subBuilder
                         ->buildPackageReferences();
 
                 $subBuilder
                     ->buildProjectReferences()
-                    ->buildResources()
+                    ->buildFiles()
                     ->buildPhar();
             }
         };
@@ -142,40 +149,32 @@ class Builder
         return $this;
     }
 
-    public function buildResources()
+    public function buildFiles()
     {
-        if (!key_exists('embeddedResources', $this->config))
+        if (!key_exists('files', $this->config))
             return $this;
 
         $this->buildPipe[] = function () {
             $resources = [];
-            foreach ($this->config['embeddedResources'] as $resourceConfiguration) {
-                $include = $resourceConfiguration['include'];
-                $exclude = $resourceConfiguration['exclude'] ?? [];
+            foreach ($this->config['files'] as $files) {
+                $include = $files['include'];
+                $exclude = $files['exclude'] ?? [];
                 $exclude[] = "/\.proj\.json$/";
                 $exclude[] = "/".preg_quote($this->buildDirectory, '/')."/";
 
                 try {
-                    $iterator = new \RegexIterator(
-                        new RecursiveIteratorIterator(
-                            new \RecursiveDirectoryIterator($this->folder, FilesystemIterator::SKIP_DOTS)
-                        ), $include
-                    );
+                    $iterator = new ExcludeRegexDirectoryIterator($this->folder, $include, $exclude);
+                    foreach($iterator as $item){
+                        [$sourcePath, $hashPath] = $iterator->current();
+
+                        $innerPath = str_replace($this->folder, '', $sourcePath);
+                        $target = $this->buildDirectory . $innerPath;
+                        $targetDir = dirname($target);
+                        $resources[] = [$targetDir, $sourcePath, $target];
+                    }
                 } catch (\Exception $ex) {
                     echo "Directory {$this->folder} regex {$include}";
                     throw $ex;
-                }
-
-                foreach ($iterator as $fileInfo) {
-                    $sourcePath = $iterator->key();
-                    foreach ($exclude as $ex)
-                        if (preg_match($ex, $sourcePath))
-                            continue 2;
-
-                    $innerPath = str_replace($this->folder, '', $sourcePath);
-                    $target = $this->buildDirectory . $innerPath;
-                    $targetDir = dirname($target);
-                    $resources[] = [$targetDir, $sourcePath, $target];
                 }
             }
 
@@ -189,6 +188,7 @@ class Builder
                     throw new \Exception("Не удалось копировать файл: {$sourcePath} > {$target}");
 
                 $this->manifest->files[] = $innerPath;
+                $this->manifest->hashes[$hashPath] = hash_file('sha256', $sourcePath);
 
                 echo "Copy file {$sourcePath} to {$target}" . PHP_EOL;
             }
@@ -227,40 +227,44 @@ class Builder
             echo "Phar compiled to directory {$this->buildDirectory}" . PHP_EOL;
         }
 
+        $this->callTargets();
+
         return $this;
+    }
+
+    protected function callTargets(){
+        if(!key_exists('targets', $this->config))
+            return;
+
+        $from = getcwd();
+        chdir($this->folder);
+
+        foreach ($this->config['targets'] as $target){
+            echo "Run target {$target}".PHP_EOL;
+            foreach ($target['tasks'] as $task){
+                $taskClass = "\PharBuilder\Tasks\\".$task['type'];
+                if(!class_exists($taskClass))
+                    throw new \Exception("Task {$task['type']} not found");
+
+                /** @var TaskBase $taskObject */
+                $taskObject = new $taskClass($task, [
+                    'buildDirectory' => $this->buildDirectory
+                ]);
+                $taskObject->execute();
+            }
+        }
+        chdir($from);
     }
 
     protected function buildLibFolder($folder, $pattern)
     {
         echo "Start build folder: {$folder}" . PHP_EOL;
-        $findIterator = new \RegexIterator(new RecursiveIteratorIterator(
-            new RecursiveDirectoryIterator($folder, FilesystemIterator::SKIP_DOTS)
-        ), $pattern, \RecursiveRegexIterator::GET_MATCH);
-        $findIterator->rewind();
 
-        $withoutExcludeHandler = function ($findIterator, $path) {
-            $innerPath = $findIterator->getSubPathName();
-            $this->buildLibFile($path, $innerPath);
-        };
-
-        $withExcludeHandler = function ($findIterator, $path) {
-            foreach ($this->config['exclude'] as $pattern) {
-                if (preg_match($pattern, $path)) {
-                    $findIterator->next();
-                    return;
-                }
-
-                $innerPath = $findIterator->getSubPathName();
-                $this->buildLibFile($path, $innerPath);
-            }
-        };
-
-        $handler = key_exists('exclude', $this->config) ? $withExcludeHandler : $withoutExcludeHandler;
-
-        while ($findIterator->valid()) {
-            $path = $findIterator->key();
-            $handler($findIterator, $path);
-            $findIterator->next();
+        $iterator = new ExcludeRegexDirectoryIterator($folder, $pattern, $this->config['exclude'] ?? null);
+        foreach ($iterator as $item){
+            [$path, $subPath] = $iterator->current();
+            $this->buildLibFile($path, $subPath);
+            $this->manifest->hashes[$subPath] = hash_file('sha256', $path);
         }
 
         echo "Folder builded: {$folder}" . PHP_EOL;
@@ -312,7 +316,6 @@ class Builder
             [$class, $method] = $this->config['entrypoint'];
             $executable .= "{$class}::{$method}(\$argv);" . PHP_EOL;
         }
-
 
         return
             <<<STUB_CODE

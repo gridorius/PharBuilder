@@ -19,17 +19,18 @@ class BuildDirector
     public function buildRelease(): Builder{
         return $this
             ->builder
-            ->buildProjectReferences(true)
+            ->buildProjectReferences()
             ->buildPackageReferences()
-            ->buildResources()
+            ->buildFiles()
             ->buildPhar();
     }
 
     public function buildPackage(): Builder{
         return $this
             ->builder
+            ->withoutPackages()
             ->buildProjectReferences()
-            ->buildResources()
+            ->buildFiles()
             ->buildPhar();
     }
 }
