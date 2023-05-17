@@ -1,10 +1,14 @@
 <?php
-include 'src/Builder.php';
-include 'src/Manifest.php';
-include 'src/Constants.php';
-include 'src/Templates.php';
-include 'src/ExcludeRegexDirectoryIterator.php';
+include 'src/Builder/Builder.php';
+include 'src/Builder/Manifest.php';
+include 'src/Builder/Constants.php';
+include 'src/Builder/Templates.php';
+include 'src/Builder/ExcludeRegexDirectoryIteratorHandler.php';
 
-(new PharBuilder\Builder('/usr/src/builder/PharBuilder.proj.json', '/bin'))
+(new Phnet\Builder\Builder(getcwd().'/src/Builder/PhnetBuilder.proj.json', getcwd().'/bin'))
     ->executable()
+    ->buildProjectReferences()
+    ->buildPhar();
+
+(new Phnet\Builder\Builder(getcwd().'/src/Core/Core.proj.json', getcwd().'/bin'))
     ->buildPhar();

@@ -1,14 +1,15 @@
 <?php
 
-namespace PharBuilder;
+namespace Phnet\Builder;
 
-use SplFileInfo;
+use Exception;
+use Phar;
 
 class Program
 {
     /** @var PhnetService */
     protected static $service;
-    protected static $loginDir = '/etc/phnet/login';
+    protected static $loginDir = '/etc/Phnett/login';
 
     public static function main($argv = [])
     {
@@ -31,10 +32,10 @@ class Program
                     static::package($argv);
                     break;
                 default:
-                    throw new \Exception('Command not found');
+                    throw new Exception('Command not found');
             }
-        } catch (\Exception $ex) {
-            fwrite(STDERR, $ex->getMessage().PHP_EOL);
+        } catch (Exception $ex) {
+            fwrite(STDERR, $ex->getMessage() . PHP_EOL);
             exit(1);
         }
     }
@@ -43,31 +44,63 @@ class Program
     {
         $options = new Options();
         $options->required(['o', 'p']);
-        $options->single(['i', 'e']);
+        $options->single(['i', 'e'], ['debug']);
 
         $options->parse($argv);
         $options = $options->getOptions();
 
+        if (isset($options['debug']))
+            define('CONFIG_DEBUG', true);
+
         $buildDirectory = $options['o'] ?? 'out';
         $director = new BuildDirector(ProjectConfig::findConfig(empty($options['p']) ? '.' : $options['p']), $buildDirectory);
-        if(!empty($options['e']))
+        if (!empty($options['e']))
             $director->executable();
 
-        $builder = $director->buildRelease();
+        $builder = $director->build();
 
-        if(!empty($options['i']))
+        if (!empty($options['i']))
             static::$service->makeIndexFile($buildDirectory, $builder->getBuildName());
     }
 
     protected static function makeIndexFile($argv)
     {
         if (!$argv[2])
-            throw new \Exception('Directory not settled');
+            throw new Exception('Directory not settled');
 
         if (!$argv[3])
-            throw new \Exception('Phar file not settled');
+            throw new Exception('Phar file not settled');
 
         static::$service->makeIndexFile($argv[2], $argv[3]);
+    }
+
+    protected static function login($argv)
+    {
+        $options = new Options();
+        $options->required([
+            'p', 's'
+        ]);
+
+        $options->parse($argv);
+        $options = $options->getOptions();
+
+        if (empty($options['s']))
+            throw new Exception('Source not settled');
+
+        if (empty($options['p']))
+            throw new Exception('Password not settled');
+
+        $password = $options['p'];
+        $source = $options['s'];
+
+        if (!is_dir(static::$loginDir))
+            mkdir(static::$loginDir, 0755, true);
+
+        $filePath = static::$loginDir . '/' . md5($source) . '.json';
+        file_put_contents($filePath, json_encode([
+            'source' => $source,
+            'password' => $password
+        ]));
     }
 
     protected static function restore($argv)
@@ -92,11 +125,11 @@ class Program
         $options = $options->getOptions();
 
         if (empty($options['s']))
-            throw new \Exception('Source not settled');
+            throw new Exception('Source not settled');
 
-        $loginPath = static::$loginDir.'/'.md5($options['s']).'.json';
-        if(!is_file($loginPath)){
-            throw new \Exception('unauthorized');
+        $loginPath = static::$loginDir . '/' . md5($options['s']) . '.json';
+        if (!is_file($loginPath)) {
+            throw new Exception('unauthorized');
         }
 
         $loginData = json_decode(file_get_contents($loginPath), true)['password'];
@@ -115,11 +148,11 @@ class Program
             'packageReferences' => $packageConfig['packageReferences'] ?? []
         ];
 
-        echo 'Wrap package' . PHP_EOL;;
+        echo 'Wrap package' . PHP_EOL;
 
         $tempname = uniqid('pack_') . '.phar';
         $packagePath = "/tmp/{$tempname}";
-        $packagePhar = new \Phar($packagePath);
+        $packagePhar = new Phar($packagePath);
         $packagePhar->startBuffering();
         $packagePhar->buildFromDirectory($builder->getBuildDirectory());
         $packagePhar->addFromString('package.manifest.json', json_encode($packageManifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
@@ -140,34 +173,6 @@ class Program
             $packageManifest['packageReferences']
         );
         unlink($packagePath);
-        echo "Package uploaded #{$packageId}" . PHP_EOL;;
-    }
-
-    protected static function login($argv){
-        $options = new Options();
-        $options->required([
-            'p', 's'
-        ]);
-
-        $options->parse($argv);
-        $options = $options->getOptions();
-
-        if (empty($options['s']))
-            throw new \Exception('Source not settled');
-
-        if (empty($options['p']))
-            throw new \Exception('Password not settled');
-
-        $password = $options['p'];
-        $source = $options['s'];
-
-        if(!is_dir(static::$loginDir))
-            mkdir(static::$loginDir, 0755, true);
-
-        $filePath = static::$loginDir.'/'.md5($source).'.json';
-        file_put_contents($filePath, json_encode([
-            'source' => $source,
-            'password' => $password
-        ]));
+        echo "Package uploaded #{$packageId}" . PHP_EOL;
     }
 }

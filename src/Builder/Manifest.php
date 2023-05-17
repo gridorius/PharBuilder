@@ -1,6 +1,6 @@
 <?php
 
-namespace PharBuilder;
+namespace Phnet\Builder;
 
 class Manifest
 {
@@ -8,6 +8,7 @@ class Manifest
     public $version = '';
     public $types = [];
     public $files = [];
+    public $resources = [];
     public $hashes = [];
     public $pharDepends = [];
 }

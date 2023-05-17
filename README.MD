@@ -21,6 +21,14 @@
       ]
     }
   ],
+  "resources": [
+    {
+      "include": "/path\/./",
+      "exclude": [
+        "/path\/.+\\.css/"
+      ]
+    }
+  ],
   "entrypoint": [
     "Entrypoint\\Class",
     "entrypointMethod"

@@ -1,6 +1,6 @@
 <?php
 
-namespace PharBuilder\Tasks;
+namespace Phnet\Builder\Tasks;
 
 class Copy extends TaskBase
 {

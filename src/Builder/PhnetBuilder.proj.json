@@ -1,0 +1,11 @@
+{
+  "name": "Phnet.Builder",
+  "version": "0.5.2",
+  "entrypoint": [
+    "Phnet\\Builder\\Program",
+    "main"
+  ],
+  "projectReferences": [
+    "../Core/Core.proj.json"
+  ]
+}

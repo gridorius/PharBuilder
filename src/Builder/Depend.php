@@ -1,6 +1,6 @@
 <?php
 
-namespace PharBuilder;
+namespace Phnet\Builder;
 
 class Depend
 {

@@ -1,6 +1,6 @@
 <?php
 
-namespace PharBuilder;
+namespace Phnet\Builder;
 
 class FluidRow
 {
@@ -19,38 +19,45 @@ class FluidRow
         $this->pattern = $pattern;
     }
 
-    public function update(...$values){
-        $this->data = sprintf($this->pattern, ...$values).PHP_EOL;
+    public function update(...$values)
+    {
+        $this->data = sprintf($this->pattern, ...$values) . PHP_EOL;
         $this->beforeRows = $this->rows;
         $this->rows = substr_count($this->data, "\n");
         $this->changed = true;
         return $this;
     }
 
-    public function write(){
+    public function write()
+    {
         $this->console->clearLine();
         $this->changed = false;
         $this->beforeRows = $this->rows;
         echo $this->data;
     }
 
-    public function isChanged(): bool{
+    public function isChanged(): bool
+    {
         return $this->changed;
     }
 
-    public function getRows(): int{
+    public function getRows(): int
+    {
         return $this->rows;
     }
 
-    public function getBeforeRows(): int{
+    public function getBeforeRows(): int
+    {
         return $this->beforeRows;
     }
 
-    public function setLine(int $line){
+    public function setLine(int $line)
+    {
         $this->line = $line;
     }
 
-    public function delete(){
+    public function delete()
+    {
         $this->console->removeRow($this->line);
     }
 }
