@@ -7,14 +7,14 @@ use SplFileInfo;
 
 class PhnetService
 {
-    public function makeIndexFile(string $directory, string $phar)
+    public function makeIndexFile(string $directory, string $name)
     {
         $indexPath = (new SplFileInfo($directory))->getRealPath();
-        $pharPath = $indexPath . '/' . $phar;
+        $pharPath = $indexPath . '/' . $name.'.phar';
 
         if (!file_exists($pharPath))
             throw new Exception("{$pharPath} not found");
 
-        file_put_contents($indexPath . '/index.php', Templates::getIndex($phar));
+        file_put_contents($indexPath . '/index.php', Templates::getIndex($name));
     }
 }

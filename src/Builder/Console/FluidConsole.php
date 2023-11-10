@@ -1,6 +1,6 @@
 <?php
 
-namespace Phnet\Builder;
+namespace Phnet\Builder\Console;
 
 class FluidConsole
 {

@@ -5,7 +5,12 @@
     "Phnet\\Builder\\Program",
     "main"
   ],
-  "projectReferences": [
-    "../Core/Core.proj.json"
+  "resources":[
+    {
+      "include": "/configuration.php/"
+    },
+    {
+      "include": "/included\\/.+/"
+    }
   ]
 }

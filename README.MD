@@ -7,12 +7,12 @@
   "projectReferences": [
     "relative/path/to/depend/project.json"
   ],
-  "packageSources": [
-    "https://phnet-registry"
-  ],
   "packageReferences": {
-    "PackageName": "1.23"
+    "PackageName": "1.23.*"
   },
+  "include-php": [
+    "helpers.php"
+  ],
   "files": [
     {
       "include": "/path\/./",
@@ -33,19 +33,8 @@
     "Entrypoint\\Class",
     "entrypointMethod"
   ],
-  "pattern": "/include files pattern/",
   "exclude": [
     "/\/dirname\/.+/"
-  ],
-  "folders": [
-    "relative/folder/path",
-    {
-      "source": "relative/source/path",
-      "target": "target/path"
-    }
-  ],
-  "buildFolders": [
-    "relative/build/folder/path"
   ],
   "targets": [
     {
@@ -62,7 +51,7 @@
         },
         {
           "type": "Delete",
-          "path": "path/to/file.extension"
+          "path": "path/to/file"
         }
       ]
     }

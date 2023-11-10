@@ -1,3 +1,3 @@
 #!/bin/bash
 
-php /usr/src/builder/bin/Phnet.Builder.phar $@
+php /usr/src/builder/bin/build/builder.phar $@

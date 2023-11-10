@@ -8,9 +8,13 @@ use RegexIterator;
 
 class ProjectConfig
 {
+    public static function parseFromPath(string $configPath){
+        return json_decode(file_get_contents($configPath), true);
+    }
+
     public static function getConfig(string $folder)
     {
-        return json_decode(file_get_contents(static::findConfig($folder)), true);
+        return static::parseFromPath(static::findConfig($folder));
     }
 
     public static function findConfig(string $folder)

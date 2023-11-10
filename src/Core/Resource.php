@@ -13,11 +13,17 @@ class Resource
         $this->path = $path;
     }
 
-    public function getPath(): string{
+    public function getPath(): string
+    {
         return $this->path;
     }
 
-    public function getName(){
+    public function getContent(): string{
+        return file_get_contents($this->path);
+    }
+
+    public function getName()
+    {
         return $this->name;
     }
 }

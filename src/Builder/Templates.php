@@ -6,18 +6,27 @@ class Templates
 {
     public static function getIndex(string $pharName)
     {
-
         return <<<TEMPLATE_STRING
-<?php
-\$innerPhar = '{$pharName}';
-\$coreManifest = json_decode(file_get_contents('phar://'.__DIR__.'/Phnet.Core.phar/manifest.json'), true);
-spl_autoload_register(function(string \$entity) use(\$coreManifest){
-    if(key_exists(\$entity, \$coreManifest['types']))
-        require 'phar://'.__DIR__.'/Phnet.Core.phar/'.\$coreManifest['types'][\$entity];
-});
+        <?php
+        use Phnet\Core\Assembly;
+        
+        require '/lib/phnet/Phnet.Core.phar';
+        Assembly::init(__DIR__, '{$pharName}');
+        Assembly::entrypoint(\$argv);
+        TEMPLATE_STRING;
+    }
 
-\Phnet\Core\Application::run(\$innerPhar);
-TEMPLATE_STRING;
+    public static function getExecutableStub($pharName){
+        return <<<TEMPLATE_STRING
+        <?php
+        use Phnet\Core\Assembly;
+        
+        Phar::mapPhar();
+        require '/lib/phnet/Phnet.Core.phar';
+        Assembly::init(__DIR__, '{$pharName}');
+        Assembly::entrypoint(\$argv);
+        __HALT_COMPILER();
+        TEMPLATE_STRING;
     }
 
     public static function getExecutableAutoload(string $pharName)
@@ -27,7 +36,7 @@ TEMPLATE_STRING;
 
 \$innerPhar = '{$pharName}';
 \$innerPharPath = "phar://{\$innerPhar}";
-\$manifest = \$mainManifest = json_decode(file_get_contents("phar://{\$innerPhar}/manifest.json"), true);
+\$manifest = \$mainManifest = json_decode(file_get_contents("{\$innerPharPath}/manifest.json"), true);
 
 \$types = [];
 foreach (\$manifest['types'] as \$type => \$path) {
@@ -36,10 +45,10 @@ foreach (\$manifest['types'] as \$type => \$path) {
 
 spl_autoload_register(function (string \$entity) use (\$types) {
     if (key_exists(\$entity, \$types))
-        require \$types[\$entity];
+        require \$innerPharPath.DIRECTORY_SEPARATOR.\$types[\$entity];
 }, false, true);
 
-foreach (\$types as \$type) {
+foreach (\$types as \$type => \$path) {
     class_exists(\$type);
 }
 TEMPLATE_STRING;

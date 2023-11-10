@@ -4,6 +4,7 @@ namespace Phnet\Builder;
 
 use Exception;
 use Phar;
+use Phnet\Builder\Console\Options;
 
 class Program
 {
@@ -43,24 +44,24 @@ class Program
     protected static function build($argv)
     {
         $options = new Options();
-        $options->required(['o', 'p']);
-        $options->single(['i', 'e'], ['debug']);
+        $options->required(['o', 'p', 'e']);
+        $options->single(['i'], ['debug', 'library']);
 
         $options->parse($argv);
         $options = $options->getOptions();
 
-        if (isset($options['debug']))
-            define('CONFIG_DEBUG', true);
-
         $buildDirectory = $options['o'] ?? 'out';
-        $director = new BuildDirector(ProjectConfig::findConfig(empty($options['p']) ? '.' : $options['p']), $buildDirectory);
-        if (!empty($options['e']))
-            $director->executable();
+        $director = new \Phnet\Builder\BuildDirector(realpath(empty($options['p']) ? '.' : $options['p']));
+        if(!empty($options['library']))
+            $director->buildIncludedLibrary($buildDirectory);
+        else
+            $director->build($buildDirectory);
 
-        $builder = $director->build();
+        if(!empty($options['e']))
+            ExecutablePacker::pack($buildDirectory, $director->getName(), $options['e']);
 
         if (!empty($options['i']))
-            static::$service->makeIndexFile($buildDirectory, $builder->getBuildName());
+            static::$service->makeIndexFile($buildDirectory, $director->getName());
     }
 
     protected static function makeIndexFile($argv)
@@ -69,7 +70,7 @@ class Program
             throw new Exception('Directory not settled');
 
         if (!$argv[3])
-            throw new Exception('Phar file not settled');
+            throw new Exception('Phar name not settled');
 
         static::$service->makeIndexFile($argv[2], $argv[3]);
     }
@@ -108,6 +109,8 @@ class Program
         $config = ProjectConfig::getConfig('.');
         $sources = $config['packageSources'];
         $manager = new PackageManager($sources);
+
+        $reader = new RecursiveProjectReader('.');
 
         $manager->loadDepends($config['packageReferences']);
     }
