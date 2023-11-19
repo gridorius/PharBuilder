@@ -23,7 +23,7 @@ jobs:
         with:
           images: gridorius/phnet
           tags: |
-            type=semver,value={{version}}
+            type=semver,pattern={{version}}
             type=raw,value=latest
 
       - name: Build and push Docker image
