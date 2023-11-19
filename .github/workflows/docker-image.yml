@@ -34,15 +34,8 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
 
       - uses: actions/checkout@v2
-      - id: load_config
-        run: |
-          content=`cat ./src/Builder/PhnetBuilder.proj.json`
-          # the following lines are only required for multi line json
-          content="${content//'%'/'%25'}"
-          content="${content//$'\n'/'%0A'}"
-          content="${content//$'\r'/'%0D'}"
-          # end of optional handling for multi line json
-          echo "projJson=$content" >> "$GITHUB_OUTPUT"
+      - run: echo "PROJECT_JSON=$(jq -c . < ./src/Builder/PhnetBuilder.proj.json)" >> $GITHUB_ENV
+      - run: echo '${{ fromJson(env.PROJECT_JSON).version }}'
 
       - name: test
         run: |
@@ -54,7 +47,7 @@ jobs:
         id: extract
         with:
           image: gridorius/phnet:latest
-          path: /phnet.${{fromJson(steps.set_var.outputs.projJson).version}}_all.tar
+          path: /phnet.${{fromJson(env.PROJECT_JSON).version}}_all.tar
 
       - name: release
         if: endsWith(github.event.ref, 'release')
