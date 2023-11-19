@@ -64,5 +64,5 @@ jobs:
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ${{ steps.extract.outputs.destination }}
-          asset_name: phnet.${{fromJson(steps.set_var.outputs.projJson).version}}_all.tar
+          asset_name: phnet.${{fromJson(steps.set_var.outputs.projJson).version}}_all.deb
           asset_content_type: application/vnd.debian.binary-package
