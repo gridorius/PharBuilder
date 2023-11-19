@@ -34,6 +34,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
 
       - id: load_config
+        uses: actions/checkout@v3
         run: |
           content=`cat ./src/Builder/PhnetBuilder.proj.json`
           # the following lines are only required for multi line json
