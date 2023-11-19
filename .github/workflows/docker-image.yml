@@ -44,6 +44,10 @@ jobs:
           # end of optional handling for multi line json
           echo "projJson=$content" >> "$GITHUB_OUTPUT"
 
+      - name: test
+        run: |
+          echo ${{steps.set_var.outputs.projJson}}
+
       - name: extract deb package
         if: endsWith(github.event.ref, 'release')
         uses: shrink/actions-docker-extract@v3
