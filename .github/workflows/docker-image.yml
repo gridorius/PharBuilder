@@ -35,11 +35,6 @@ jobs:
 
       - uses: actions/checkout@v2
       - run: echo "PROJECT_JSON=$(jq -c . < ./src/Builder/PhnetBuilder.proj.json)" >> $GITHUB_ENV
-      - run: echo '${{ fromJson(env.PROJECT_JSON).version }}'
-
-      - name: test
-        run: |
-          echo "${{steps.set_var.outputs.projJson}}"
 
       - name: extract deb package
         if: endsWith(github.event.ref, 'release')
@@ -47,7 +42,7 @@ jobs:
         id: extract
         with:
           image: gridorius/phnet:latest
-          path: /phnet.${{fromJson(env.PROJECT_JSON).version}}_all.tar
+          path: /phnet.${{fromJson(env.PROJECT_JSON).version}}_all.deb
 
       - name: release
         if: endsWith(github.event.ref, 'release')
