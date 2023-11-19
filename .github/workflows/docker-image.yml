@@ -46,7 +46,7 @@ jobs:
 
       - name: test
         run: |
-          echo ${{steps.set_var.outputs.projJson}}
+          echo "${{steps.set_var.outputs.projJson}}"
 
       - name: extract deb package
         if: endsWith(github.event.ref, 'release')
