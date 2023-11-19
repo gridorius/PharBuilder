@@ -35,7 +35,7 @@ jobs:
 
       - id: load_config
         run: |
-          content=`cat ./usr/src/builder/src/Builder.PhnetBuilder.proj.json`
+          content=`cat ./src/builder/PhnetBuilder.proj.json`
           # the following lines are only required for multi line json
           content="${content//'%'/'%25'}"
           content="${content//$'\n'/'%0A'}"
