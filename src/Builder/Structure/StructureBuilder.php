@@ -3,9 +3,10 @@
 namespace Phnet\Builder\Structure;
 
 use Exception;
+use Phnet\Builder\Console\MultilineOutput;
+use Phnet\Builder\Console\Row;
 use Phnet\Builder\EntityFinder;
 use Phnet\Builder\FIleScanning\Scanner;
-use Phnet\Builder\Manifest;
 
 class StructureBuilder
 {
@@ -25,26 +26,38 @@ class StructureBuilder
         $this->config = $config;
     }
 
-    public function useTypeFiles($prefix = ''): StructureBuilder
+    public function useTypeFiles(): StructureBuilder
     {
-        $this->pipes[] = function (Structure $structure) use ($prefix) {
-            foreach ($this->projectFiles->filterFiles("/\.php/", $this->config['exclude'] ?? []) as $path => $subPath) {
-                $this->buildLibFile($structure, $path, $subPath, $prefix);
+        $this->pipes[] = function (Structure $structure, Row $row) {
+            if (!empty($this->config['build'])) {
+                foreach ($this->config['build'] as $params)
+                    $this->buildLibFilesFromFilter($params, $structure, $row);
+            } else {
+                $this->buildLibFilesFromFilter([
+                    'include' => "*.php",
+                    'exclude' => $this->config['exclude'] ?? []
+                ], $structure, $row);
             }
         };
 
         return $this;
     }
 
-    private function buildLibFile(Structure $structure, $path, $innerPath, $prefix = '')
+    private function buildLibFilesFromFilter(array $filter, Structure $structure, Row $row)
+    {
+        foreach ($this->projectFiles->filterFiles($filter) as $path => $subPath) {
+            $this->buildLibFile($structure, $path, $subPath, $row);
+        }
+    }
+
+    private function buildLibFile(Structure $structure, $path, $innerPath, Row $row)
     {
         $types = EntityFinder::findByTokens($path);
         if (count($types) > 0) {
             foreach ($types as $type) {
-                $typePath = $prefix . $innerPath;
-                $structure->manifest->types[$type] = $typePath;
-                $structure->types[$path] = $typePath;
-                echo "Found type {$type}" . PHP_EOL;
+                $structure->manifest->types[$type] = $innerPath;
+                $structure->types[$path] = $innerPath;
+                $row->addSubdata("Found type {$type}");
             }
         }
     }
@@ -56,18 +69,9 @@ class StructureBuilder
 
         $this->pipes[] = function (Structure $structure) {
             foreach ($this->config['files'] as $files) {
-                $include = $files['include'];
-                $exclude = $files['exclude'] ?? [];
-
-                try {
-                    foreach ($this->projectFiles->filterFiles($include, $exclude) as $sourcePath => $subPath) {
-                        $structure->files[$sourcePath] = $subPath;
-                        $structure->manifest->files[] = $subPath;
-                        $structure->manifest->hashes[$subPath] = hash_file('sha256', $sourcePath);
-                    }
-                } catch (Exception $ex) {
-                    echo "Directory {$this->projectPath} regex {$include}";
-                    throw $ex;
+                foreach ($this->projectFiles->filterFiles($files) as $sourcePath => $subPath) {
+                    $structure->files[$sourcePath] = $subPath;
+                    $structure->manifest->files[] = $subPath;
                 }
             }
         };
@@ -80,15 +84,15 @@ class StructureBuilder
             return $this;
 
         $this->pipes[] = function (Structure $structure) {
-            foreach ($this->config['include-php'] as $path) {
-                $globalPath = $this->projectPath . DIRECTORY_SEPARATOR . $path;
-                if (!file_exists($path))
-                    throw new Exception("include file \"{$globalPath}\" not exist");
-
-                $structure->includePhp[$globalPath] = $path;
-                $structure->manifest->include[$globalPath] = $path;
+            foreach ($this->config['include-php'] as $params) {
+                foreach ($this->projectFiles->filterFiles($params) as $sourcePath => $subPath) {
+                    $structure->includePhp[$sourcePath] = $subPath;
+                    $structure->manifest->include[] = $subPath;
+                }
             }
         };
+
+        return $this;
     }
 
     public function useResources(): StructureBuilder
@@ -98,16 +102,9 @@ class StructureBuilder
 
         $this->pipes[] = function (Structure $structure) {
             foreach ($this->config['resources'] as $resource) {
-                $include = $resource['include'];
-                $exclude = $resource['exclude'] ?? [];
-                try {
-                    foreach ($this->projectFiles->filterFiles($include, $exclude) as $sourcePath => $subPath) {
-                        $structure->resources[$sourcePath] = $subPath;
-                        $structure->manifest->resources[$subPath] = $subPath;
-                    }
-                } catch (Exception $ex) {
-                    echo "Directory {$this->projectPath} regex {$include}" . PHP_EOL;
-                    throw $ex;
+                foreach ($this->projectFiles->filterFiles($resource) as $sourcePath => $subPath) {
+                    $structure->resources[$sourcePath] = $subPath;
+                    $structure->manifest->resources[$subPath] = $subPath;
                 }
             }
         };
@@ -115,11 +112,25 @@ class StructureBuilder
         return $this;
     }
 
+    public function addProjectReferences(array $references)
+    {
+        $this->pipes[] = function (Structure $structure) use ($references) {
+            $structure->manifest->depends = array_merge($structure->manifest->depends, $references);
+        };
+    }
+
     public function build(): Structure
     {
         $structure = new Structure($this->config);
+        $structureRow = MultilineOutput::getInstance()
+            ->createRow()
+            ->update("Build {$structure->manifest->name}({$structure->manifest->version}) {time}");
+        $stubPath = $this->projectPath . DIRECTORY_SEPARATOR . 'stub.php';
+        if (is_file($stubPath))
+            $structure->stub = $stubPath;
+
         foreach ($this->pipes as $pipe) {
-            $pipe($structure);
+            $pipe($structure, $structureRow);
         }
 
         return $structure;

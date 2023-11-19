@@ -1,17 +1,17 @@
 <?php
 
-namespace Phnet\Builder;
+namespace Phnet\Builder\Manifests;
 
-class Manifest
+class ProjectManifest
 {
+    public $type = 'project';
     public $name = '';
     public $version = '';
     public $types = [];
     public $include = [];
     public $files = [];
     public $resources = [];
-    public $hashes = [];
-    public $pharDepends = [];
+    public $depends = [];
     public $entrypoint;
 
     public function __construct(array $config)
@@ -21,7 +21,7 @@ class Manifest
 
         $this->name = $config['name'];
         $this->version = $config['version'] ?? '1.0.0';
-        $this->pharDepends = $this->config['packageReferences'] ?? [];
+        $this->depends = $this->config['packageReferences'] ?? [];
         if(!empty($config['entrypoint']))
             $this->entrypoint = $config['entrypoint'];
     }

@@ -3,17 +3,25 @@
 namespace Phnet\Builder;
 
 use Exception;
-use Phar;
+use Phnet\Builder\Console\MultilineOutput;
 use Phnet\Builder\Console\Options;
+use Phnet\Builder\Source\SourceManager;
+use Phnet\Core\Resources;
 
 class Program
 {
     /** @var PhnetService */
     protected static $service;
-    protected static $loginDir = '/etc/Phnett/login';
+    /** @var PackageManager */
+    protected static $packageManager;
+    /** @var SourceManager */
+    protected static $sourceManager;
 
     public static function main($argv = [])
     {
+        $config = Resources::get('configuration.php')->include();
+        static::$packageManager = new PackageManager($config);
+        static::$sourceManager = new SourceManager($config);
         static::$service = new PhnetService();
         try {
             switch ($argv[1]) {
@@ -51,14 +59,23 @@ class Program
         $options = $options->getOptions();
 
         $buildDirectory = $options['o'] ?? 'out';
-        $director = new \Phnet\Builder\BuildDirector(realpath(empty($options['p']) ? '.' : $options['p']));
-        if(!empty($options['library']))
-            $director->buildIncludedLibrary($buildDirectory);
+        $director = new BuildDirector(static::$packageManager, realpath(empty($options['p']) ? '.' : $options['p']));
+
+        $start = time();
+        $output = MultilineOutput::getInstance();
+        $output->setParams([
+            'time' => function () use ($start) {
+                return time() - $start;
+            }
+        ]);
+        $output->createRow()->update('Build project {time}');
+
+        if (!empty($options['e']))
+            $director->buildSingle($buildDirectory, $options['e']);
+        else if (!empty($options['library']))
+            $director->buildLibrary($buildDirectory);
         else
             $director->build($buildDirectory);
-
-        if(!empty($options['e']))
-            ExecutablePacker::pack($buildDirectory, $director->getName(), $options['e']);
 
         if (!empty($options['i']))
             static::$service->makeIndexFile($buildDirectory, $director->getName());
@@ -77,42 +94,38 @@ class Program
 
     protected static function login($argv)
     {
-        $options = new Options();
-        $options->required([
-            'p', 's'
-        ]);
+        $source = $argv[2];
+        if (empty(trim($source)))
+            throw new Exception('source not set');
 
-        $options->parse($argv);
-        $options = $options->getOptions();
+        echo 'Enter login:';
+        $login = fgets(STDIN);
+        echo PHP_EOL;
+        echo 'Enter password:';
+        $password = fgets(STDIN);
+        echo PHP_EOL;
 
-        if (empty($options['s']))
-            throw new Exception('Source not settled');
-
-        if (empty($options['p']))
-            throw new Exception('Password not settled');
-
-        $password = $options['p'];
-        $source = $options['s'];
-
-        if (!is_dir(static::$loginDir))
-            mkdir(static::$loginDir, 0755, true);
-
-        $filePath = static::$loginDir . '/' . md5($source) . '.json';
-        file_put_contents($filePath, json_encode([
-            'source' => $source,
-            'password' => $password
-        ]));
+        static::$sourceManager->getSource($source)->auth($login, $password);
     }
 
     protected static function restore($argv)
     {
-        $config = ProjectConfig::getConfig('.');
-        $sources = $config['packageSources'];
-        $manager = new PackageManager($sources);
-
-        $reader = new RecursiveProjectReader('.');
-
-        $manager->loadDepends($config['packageReferences']);
+        $start = time();
+        $output = MultilineOutput::getInstance();
+        $output->setParams([
+            'time' => function () use ($start) {
+                return time() - $start;
+            }
+        ]);
+        $output->createRow()->update('Restore project {time}');
+        $reader = new DependencyFinder('.');
+        $dependsRow = $output->createRow('depends')->update('Restore depends {time}');
+        static::$packageManager
+            ->loadDepends($reader->getDepends(), static::$sourceManager->getSources($reader->getSources()));
+        $dependsRow->clearSubdata();
+        $externalDependsRow = $output->createRow('externalDepends')->update('Restore external depends {time}');
+        static::$packageManager->loadExternalDepends($reader->getExternalDepends());
+        $externalDependsRow->clearSubdata();
     }
 
     protected static function package($argv)
@@ -130,52 +143,20 @@ class Program
         if (empty($options['s']))
             throw new Exception('Source not settled');
 
-        $loginPath = static::$loginDir . '/' . md5($options['s']) . '.json';
-        if (!is_file($loginPath)) {
-            throw new Exception('unauthorized');
-        }
 
-        $loginData = json_decode(file_get_contents($loginPath), true)['password'];
+        if (!static::$sourceManager->isAuthorized($options['s']))
+            throw new Exception('unauthorized');
 
         echo 'Start build package' . PHP_EOL;
-
-        $buildDir = '/tmp/' . uniqid('build_');
-        mkdir($buildDir, 0755, true);
-        $director = new BuildDirector(ProjectConfig::findConfig('.'), $buildDir);
-        $builder = $director->buildPackage();
-
-        $packageConfig = ProjectConfig::getConfig('.');
-        $packageManifest = [
-            'name' => $packageConfig['name'],
-            'version' => $packageConfig['version'],
-            'packageReferences' => $packageConfig['packageReferences'] ?? []
-        ];
-
-        echo 'Wrap package' . PHP_EOL;
-
-        $tempname = uniqid('pack_') . '.phar';
-        $packagePath = "/tmp/{$tempname}";
-        $packagePhar = new Phar($packagePath);
-        $packagePhar->startBuffering();
-        $packagePhar->buildFromDirectory($builder->getBuildDirectory());
-        $packagePhar->addFromString('package.manifest.json', json_encode($packageManifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-        $packagePhar->stopBuffering();
-
+        $director = new BuildDirector(static::$packageManager, realpath('.'));
+        $packResult = $director->buildPackage();
         echo 'Start uploading' . PHP_EOL;
 
-        array_map('unlink', glob($builder->getBuildDirectory() . '/*'));
-        rmdir($builder->getBuildDirectory());
-
-        $packageId = PackageManager::uploadPackage(
-            $packageManifest['name'],
-            $packageManifest['version'],
-            $packagePath,
-            $options['s'],
-            $loginData['password'],
+        $packageId = static::$packageManager->uploadPackage(
+            static::$sourceManager->getCredentials($options['s']),
+            $packResult,
             !key_exists('private', $options),
-            $packageManifest['packageReferences']
         );
-        unlink($packagePath);
         echo "Package uploaded #{$packageId}" . PHP_EOL;
     }
 }

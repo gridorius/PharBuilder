@@ -2,12 +2,9 @@
 
 namespace Phnet\Core;
 
-use Phar;
-
 class Assembly
 {
     private static $assemblies = [];
-    private static $types = [];
     private static $entrypoint;
     private static $directory;
 
@@ -20,75 +17,87 @@ class Assembly
             );
     }
 
-    public static function setDirectory(string $directory)
+    public static function init(string $directory, string $name)
     {
         static::$directory = $directory;
-    }
 
-    public static function init(string $directory, string $name){
-        static::$directory = $directory;
-
-        $manifest = static::getManifest($directory, $name);
-        static::registerAssembly($name, $manifest);
-        static::loadDependsRecursive($manifest);
+        $assembly = static::registerAssembly(static::includeAssembly($name));
+        static::loadDependsRecursive($assembly);
         static::loadTypes();
         static::loadResources();
+        static::includeFiles();
     }
 
-    protected static function loadDependsRecursive($manifest){
-        foreach ($manifest['pharDepends'] as $name => $version) {
+    public static function initSingle(string $directory, $assembly)
+    {
+        static::$directory = $directory;
+        static::registerAssembly($assembly);
+        static::loadDependsRecursive($assembly);
+        static::loadTypes();
+        static::loadResources();
+        static::includeFiles();
+    }
+
+    protected static function loadDependsRecursive($assembly)
+    {
+        foreach ($assembly->getDepends() as $name => $version) {
             if (!key_exists($name, static::$assemblies)) {
-                $manifest = static::registerAssembly($name, static::getManifest(static::$directory, $name));
-                if (!empty($manifest['pharDepends']))
-                    static::loadDependsRecursive($manifest);
+                $assembly = static::includeAssembly($name);
+                static::registerAssembly($assembly);
+                if ($assembly->hasDepends())
+                    static::loadDependsRecursive($assembly);
             }
         }
     }
 
-    protected static function getManifest(string $directory, string $name){
-        $phar = static::getPharPath($directory, $name);
-        if(!file_exists($phar))
-            throw new \Exception("Depends {$name} not exist");
-        return json_decode(file_get_contents($phar.DIRECTORY_SEPARATOR.'/manifest.json'), true);
-    }
-
-    protected static function getPharPath(string $directory, string $name): string{
-        return 'phar://'.$directory.DIRECTORY_SEPARATOR.$name.'.phar';
-    }
-
-    public static function registerAssembly(string $name, array $manifest): array
+    public static function includeAssembly(string $name)
     {
-        static::$assemblies[$name] = $manifest;
-        if (!empty($manifest['entrypoint']))
-            static::$entrypoint = $manifest['entrypoint'];
+        return require static::$directory . DIRECTORY_SEPARATOR . $name . '.phar';
+    }
 
-        return $manifest;
+    public static function registerAssembly($assembly)
+    {
+        switch ($assembly->getType()) {
+            case 'project':
+                static::$assemblies[$assembly->getName()] = $assembly;
+                if ($assembly->hasEntrypoint())
+                    static::$entrypoint = $assembly;
+                break;
+            case 'single':
+                if ($assembly->hasEntrypoint())
+                    static::$entrypoint = $assembly;
+
+                foreach ($assembly->getAssemblies() as $name => $subAssembly) {
+                    static::$assemblies[$name] = $subAssembly;
+                }
+
+                break;
+        }
+        return $assembly;
     }
 
     public static function loadTypes()
     {
-        foreach (static::$assemblies as $name => $manifest) {
-            $assemblyPath = static::getPharPath(static::$directory, $name);
-            foreach ($manifest['types'] as $type => $path) {
-                static::$types[$type] = $assemblyPath . DIRECTORY_SEPARATOR . $path;
-            }
-        }
-
-        spl_autoload_register(function (string $entity) {
-            if (key_exists($entity, static::$types))
-                require static::$types[$entity];
-        }, false, true);
-
-        foreach (static::$types as $type => $path)
-            class_exists($type);
+        foreach (static::$assemblies as $name => $assembly)
+            $assembly->registerTypes();
+        foreach (static::$assemblies as $name => $assembly)
+            $assembly->preloadClasses();
     }
 
     public static function loadResources()
     {
-        foreach (static::$assemblies as $name => $manifest) {
-            $assemblyPath = static::getPharPath(static::$directory, $name);
-            foreach ($manifest['resources'] as $alias => $path) {
-                Resources::register($alias, $assemblyPath . DIRECTORY_SEPARATOR . $path);
+        foreach (static::$assemblies as $assembly) {
+            foreach ($assembly->getResources() as $alias => $path) {
+                Resources::register($alias, $path);
+            }
+        }
+    }
+
+    public static function includeFiles()
+    {
+        foreach (static::$assemblies as $assembly) {
+            foreach ($assembly->getInclude() as $path) {
+                require $path;
             }
         }
     }
@@ -96,8 +105,7 @@ class Assembly
     public static function entrypoint($argv)
     {
         if (!empty(static::$entrypoint)) {
-            [$class, $method] = static::$entrypoint;
-            $class::$method($argv);
+            static::$entrypoint->run($argv);
         }
     }
 }

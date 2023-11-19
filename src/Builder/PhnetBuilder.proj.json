@@ -1,16 +1,16 @@
 {
   "name": "Phnet.Builder",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "entrypoint": [
     "Phnet\\Builder\\Program",
     "main"
   ],
   "resources":[
     {
-      "include": "/configuration.php/"
+      "include": "configuration.php"
     },
     {
-      "include": "/included\\/.+/"
+      "include": "templates/*.php"
     }
   ]
 }

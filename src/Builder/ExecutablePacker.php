@@ -2,6 +2,10 @@
 
 namespace Phnet\Builder;
 
+use Phnet\Builder\Manifests\ProjectManifest;
+use Phnet\Builder\Manifests\SingleManifest;
+use Phnet\Builder\Structure\PharBuilder;
+
 class ExecutablePacker
 {
     public static function pack(string $packDirectory, string $mainProject, string $as, string $toDirectory = 'out'){
@@ -13,37 +17,38 @@ class ExecutablePacker
         if(!is_dir($outDir))
             mkdir($outDir, 0755, true);
 
-        foreach (glob($packDirectory.'/*.phar') as $pharProject){
-            $projects[basename($pharProject, '.phar')] = $pharProject;
-        }
+        $mainAssembly = require $packDirectory.DIRECTORY_SEPARATOR.$mainProject.'.phar';
+        $projects = [
+            $mainProject => $mainAssembly
+        ];
+        static::loadDepends($packDirectory, $mainAssembly, $projects);
+
+        $globalManifest = new SingleManifest();
+        if($mainAssembly->hasEntrypoint())
+            $globalManifest->entrypoint = $mainAssembly->getEntrypoint();
 
         $phar = new \Phar($outPhar);
         $phar->startBuffering();
 
-        $globalManifest = new Manifest([
-            'name' => $as,
-        ]);
 
-        foreach ($projects as $project => $path){
-            $pharPath = "phar://{$path}";
-            $manifest = json_decode(file_get_contents($pharPath."/manifest.json"), true);
-
-            if($project == $mainProject)
-                $globalManifest->entrypoint = $manifest['entrypoint'];
-
+        foreach ($projects as $assembly){
+            $manifest = $assembly->getManifest();
+            $pharPath = $assembly->getPath();
+            $name = $assembly->getName();
+            $directory = $name.DIRECTORY_SEPARATOR;
+            $pharDirectoryPath = $pharPath.DIRECTORY_SEPARATOR;
             foreach ($manifest['types'] as $type => $innerPath){
-                $newInnerPath = $project.DIRECTORY_SEPARATOR.$innerPath;
-                $phar->addFile($pharPath.DIRECTORY_SEPARATOR.$innerPath, $newInnerPath);
-                $globalManifest->types[$type] = $newInnerPath;
+                $newInnerPath = $directory.$innerPath;
+                $manifest['types'][$type] = $newInnerPath;
+                $phar->addFile($pharDirectoryPath.$innerPath, $newInnerPath);
             }
 
             foreach ($manifest['resources'] as $accessPath => $innerPath){
-                $phar->addFile($pharPath.DIRECTORY_SEPARATOR.$innerPath, $innerPath);
-                $globalManifest->resources[$accessPath] = $innerPath;
+                $manifest['resources'][$accessPath] = $innerPath;
+                $phar->addFile($pharDirectoryPath.$innerPath, $innerPath);
             }
 
             foreach ($manifest['files'] as $file){
-                $globalManifest->files[] = $file;
                 $fileDir = dirname($outDir.DIRECTORY_SEPARATOR.$file);
                 if(!is_dir($fileDir))
                     mkdir($fileDir, 0755, true);
@@ -52,11 +57,21 @@ class ExecutablePacker
                     throw new \Exception("Fail copy file {$file}");
                 }
             }
+
+            $globalManifest->assemblies[] = $manifest;
         }
-
-        $phar->addFromString('manifest.json', json_encode($globalManifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-        $phar->setStub(Templates::getExecutableStub($as));
-
         $phar->stopBuffering();
+        PharBuilder::buildSingle($phar, $globalManifest);
+    }
+
+    protected static function loadDepends(string $directory, $assembly, &$depends = []){
+        foreach ($assembly->getDepends() as $depend => $version)
+            if(!$depends[$depend]){
+                $subAssembly = $depends[$depend] = require $directory.DIRECTORY_SEPARATOR.$depend.'.phar';
+                if($subAssembly->hasDepends())
+                    static::loadDepends($directory, $subAssembly, $depends);
+            }
+
+        return $depends;
     }
 }

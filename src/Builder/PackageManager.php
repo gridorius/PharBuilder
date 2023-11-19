@@ -2,199 +2,187 @@
 
 namespace Phnet\Builder;
 
-use Closure;
 use Exception;
-use Phar;
+use Phnet\Builder\Console\MultilineOutput;
+use Phnet\Builder\Console\PercentEcho;
+use Phnet\Builder\ExternalPackages\IExternalPackage;
+use Phnet\Builder\FIleScanning\Scanner;
+use Phnet\Builder\HttpClient\Client;
+use Phnet\Builder\Manifests\PackageManifest;
+use Phnet\Builder\Manifests\ProjectManifest;
+use Phnet\Builder\Source\Source;
+use Phnet\Builder\Source\SourcePackage;
 
 class PackageManager
 {
-    protected static $packagesPath = '/var/Phnett/packages/';
-    protected $sources;
+    protected string $packagesPath;
+    /** @var IExternalPackage[] $external */
+    protected array $external = [];
 
-    public function __construct(array $sources)
+    public function __construct(array $config)
     {
-        $this->sources = $sources;
+        $this->packagesPath = $config['packagePath'];
+        if (!is_dir($this->packagesPath))
+            mkdir($this->packagesPath, 0755, true);
+
+        foreach (get_declared_classes() as $class) {
+            if (is_subclass_of($class, IExternalPackage::class)) {
+                $external = new $class($this);
+                $this->external[$external->getName()] = $external;
+            }
+        }
     }
 
-    public static function uploadPackage(
-        string $packageName,
-        string $packageVersion,
-        string $packageFile,
-        string $source,
-        string $password,
-        bool   $isPublic = true,
-        array  $references = []
+    public function uploadPackage(
+        Source $source,
+        array  $packResult,
+        bool   $isPublic = true
     )
     {
-        $post = [
-            'package' => curl_file_create($packageFile, ''),
-            'name' => $packageName,
-            'version' => $packageVersion,
-            'password' => $password,
+        $data = [
+            'package' => curl_file_create($packResult['path']),
+            'name' => $packResult['name'],
+            'version' => $packResult['version'],
             'isPublic' => $isPublic,
-            'references' => $references
+            'references' => $packResult['depends']
         ];
 
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $source . '/add/package');
-        curl_setopt($ch, CURLOPT_POST, 1);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $post);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        $response = curl_exec($ch);
-
-        if ($error = curl_error($ch))
-            throw new Exception($error);
-
-        curl_close($ch);
-
-        $result = json_decode($response, true);
-        if (is_null($result))
-            throw new Exception('Result not converted');
-
-        if (!empty($result['error']))
-            throw new Exception($result['error']);
-
-        return $result['PackageId'];
+        return $source->uploadPackage($data);
     }
 
-    public static function unpackToBuild(string $packagePath, string $buildPath)
+    public function loadDepends($depends, array $sources): PackageManager
     {
-        $data = new Phar($packagePath);
-        $data->extractTo($buildPath);
-    }
-
-    public function loadDepends($depends)
-    {
+        if (empty($depends)) return $this;
+        $needDownload = [];
+        $subDepends = [];
         foreach ($depends as $name => $version) {
-            $localPackage = static::findLocally($name, $version);
-            $subDepends = [];
+            $localPackage = $this->findLocal($name, $version);
             if ($localPackage) {
-                echo "Package {$name}, version {$localPackage['version']} found locally" . PHP_EOL;
+                MultilineOutput::getInstance()
+                    ->getRow('depends')
+                    ->addSubdata("Package {$name}, version {$localPackage['version']} found locally");
+
                 $localPath = $localPackage['path'];
-
-                $manifestPath = "phar://{$localPath}/package.manifest.json";
-
-                if ($manifestRaw = file_get_contents($manifestPath)) {
-                    $manifest = json_decode($manifestRaw, true);
-                    $subDepends = $manifest['packageReferences'];
-                } else {
-                    throw new Exception("Failed read package manifest in {$manifestPath}");
-                }
+                $manifest = require $localPath;
+                foreach ($manifest['depends'] as $depend => $ver)
+                    $subDepends[$depend] = $ver;
             } else {
-                $foundPackage = $this->findPackage($name, $version);
-                if ($foundPackage) {
-                    $localPath = static::getPackagePath($name, $foundPackage['version']);
-
-                    $subDepends = $foundPackage['references'];
-
-                    echo PHP_EOL;
-                    static::downloadPackage($foundPackage['path'], $localPath, function ($full, $loaded) use ($name, $foundPackage) {
-                        $piece = round(($loaded / $full) * 20);
-                        $progress = str_pad(str_pad('', $piece, '+'), 20, '-');
-                        echo "Download package {$name}, version {$foundPackage['version']}: [$progress]\r";
-                    });
-                    echo PHP_EOL;
-                }
+                $needDownload[$name] = $version;
             }
-
-            if (!$localPath)
-                throw new Exception('package not found');
-
-            $this->loadDepends($subDepends);
         }
+
+        $foundPackages = $this->findPackages($needDownload, $sources);
+        foreach ($foundPackages as $path => $sourcePackage) {
+            $sourcePackage->download($path);
+            $manifest = require $path;
+            foreach ($manifest['depends'] as $depend => $ver)
+                $subDepends[$depend] = $ver;
+        }
+
+        $this->loadDepends($subDepends, $sources);
+        return $this;
     }
 
-    public static function findLocally($name, $version): ?array
+    public function loadExternalDepends(array $references): PackageManager
     {
-        $packagePath = static::$packagesPath . $name . '/' . $version . '.phar';
-        $found = glob($packagePath);
-        if (count($found) > 0) {
-            $path = reset($found);
-            preg_match("/\/(?<version>([^\/]+))\.phar$/", $path, $matches);
-            return [
-                'version' => $matches['version'],
-                'path' => $path
-            ];
+        foreach ($references as $reference) {
+            if ($this->hasExternal($reference['type'])) {
+                $this->getExternal($reference['type'])->restore($reference);
+            } else {
+                throw new Exception("Restore handler for type {$reference['type']} not found");
+            }
         }
 
-        return null;
+        return $this;
     }
 
-    public function findPackage($name, $version)
+    public function hasExternal(string $name): bool
     {
-        $query = http_build_query([
-            'name' => $name,
-            'version' => $version
-        ]);
-
-        echo "Find package {$name} {$version} in soruces: " . implode(', ', $this->sources) . PHP_EOL;
-
-        foreach ($this->sources as $source) {
-            $ch = curl_init();
-            curl_setopt($ch, CURLOPT_URL, $source . '/find/package' . '?' . $query);
-            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-            $response = curl_exec($ch);
-
-            if ($error = curl_error($ch))
-                throw new Exception($error);
-
-            curl_close($ch);
-            $found = json_decode($response, true);
-            if (is_null($found))
-                throw new Exception('decode exception');
-
-            if (empty($found))
-                continue;
-
-            $package = reset($found);
-            return [
-                'source' => $source,
-                'path' => $source . "/package/{$package['PackageId']}/",
-                'version' => $package['PackageVersion'],
-                'references' => $package['PackageReferences']
-            ];
-        }
-
-        return null;
+        return !empty($this->external[$name]);
     }
 
-    public static function getPackagePath($name, $version): string
+    public function getExternal(string $name): IExternalPackage
     {
-        $packagePath = static::$packagesPath . $name;
-        mkdir($packagePath, 0755, true);
-        return $packagePath . '/' . $version . '.phar';
+        return $this->external[$name];
     }
 
-    public static function downloadPackage($sourcePath, $targetPath, Closure $onIteration = null)
+    public function findLocal(string $name, string $version): ?array
     {
-        $context = stream_context_create(array(
-            'http' => array(
-                'timeout' => 2.0
-            )
-        ));
-
-        $from = fopen($sourcePath, 'r', false, $context);
-        $to = fopen($targetPath, 'w');
-        $loaded = 0;
-
-        $headers = [];
-        foreach (stream_get_meta_data($from)['wrapper_data'] as $item) {
-            [$header, $value] = explode(':', $item, 2);
-            $headers[$header] = $value;
+        $found = [];
+        foreach (glob($this->getPackagePath($name, $version)) as $packagePath) {
+            $found[] = $packagePath;
         }
 
-        $size = $headers['Content-Length'];
+        if (count($found) == 0)
+            return null;
 
-        while (!feof($from)) {
-            $data = fgets($from, 10000);
-            $loaded += strlen($data);
-            $onIteration($size, $loaded);
-            fwrite($to, $data);
-            if ($loaded == $size)
-                break;
+        $path = end($found);
+        preg_match("/\/(?<version>([^\/]+))\.phar$/", $path, $matches);
+        return [
+            'version' => $matches['version'],
+            'path' => $path
+        ];
+    }
+
+    public function pack(string $path, ProjectManifest $manifest, array $depends, array $externalDepends = [], array $requiredModules = []): array
+    {
+        $packagePath = $this->getPackagePath($manifest->name, $manifest->version);
+        $phar = new \Phar($packagePath);
+        $phar->startBuffering();
+        $phar->buildFromDirectory($path);
+        $packageManifest = new PackageManifest($manifest->name, $manifest->version, $depends);
+        $packageManifest->externalDepends = $externalDepends;
+        $packageManifest->requiredModules = $requiredModules;
+        $files = Scanner::scanFiles($path)->getFiles();
+        foreach ($files as $filePath)
+            $packageManifest->hashes[$filePath] = hash_file('sha256', $path . DIRECTORY_SEPARATOR . $filePath);
+
+        $phar->setMetadata($packageManifest);
+        $phar->stopBuffering();
+
+        return [
+            'path' => $packagePath,
+            'name' => $packageManifest->name,
+            'version' => $packageManifest->version,
+            'depends' => $depends
+        ];
+    }
+
+    public function unpack(string $path, string $outDir)
+    {
+        $data = new \Phar($path);
+        $data->extractTo($outDir, null, true);
+    }
+
+    private function getPackagePath(string $name, string $version): string
+    {
+        return $this->packagesPath . $name . '_' . $version . '.phar';
+    }
+
+    /**
+     * @param Source[] $sources
+     * @return SourcePackage[]
+     */
+    public function findPackages(array $depends, array $sources): array
+    {
+        $result = [];
+        $notFound = $depends;
+        foreach ($sources as $source) {
+            $result = $source->findPackages($notFound);
+            foreach ($result['found'] as $name => $version) {
+                unset($notFound[$name]);
+                $result[$this->getPackagePath($name, $version)] = new SourcePackage($source, $name, $version);
+            }
         }
 
-        fclose($from);
-        fclose($to);
+        if (count($notFound) > 0) {
+            $packages = [];
+            foreach ($notFound as $name => $version)
+                $packages[] = "{$name}({$version})";
+            $packagesString = implode(', ', $packages);
+            throw new Exception("Not found packages: {$packagesString}");
+        }
+
+        return $result;
     }
 }

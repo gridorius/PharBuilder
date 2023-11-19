@@ -11,12 +11,67 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-      - name: Login in docker
-        run: docker login -u ${{ secrets.DOCKER_HUB_USERNAME }} -p ${{ secrets.DOCKER_HUB_TOKEN }}
-      - name: Build the Docker image
-        run: docker build -t gridorius/phnet:latest -t gridorius/phnet:${{github.ref_name}} .
-      - name: Push docker image
+      - name: Log in to Docker Hub
+        uses: docker/login-action
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action
+        with:
+          images: gridorius/phnet
+          tags: |
+            type=semver,value={{version}}
+            type=raw,value=latest
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - id: load_config
         run: |
-          docker push gridorius/phnet:latest
-          docker push gridorius/phnet:${{github.ref_name}}
+          content=`cat ./usr/src/builder/src/Builder.PhnetBuilder.proj.json`
+          # the following lines are only required for multi line json
+          content="${content//'%'/'%25'}"
+          content="${content//$'\n'/'%0A'}"
+          content="${content//$'\r'/'%0D'}"
+          # end of optional handling for multi line json
+          echo "::set-output name=projJson::$content"
+
+      - name: extract deb package
+        if: endsWith(github.event.ref, 'release')
+        uses: shrink/actions-docker-extract@v3
+        id: extract
+        with:
+          image: gridorius/phnet:latest
+          path: /phnet.${{fromJson(steps.set_var.outputs.projJson).version}}_all.tar
+
+      - name: release
+        if: endsWith(github.event.ref, 'release')
+        uses: actions/create-release@v1
+        id: create_release
+        with:
+          draft: false
+          prerelease: false
+          release_name: ${{ github.ref }}
+          tag_name: ${{ github.ref }}
+          body_path: CHANGELOG.md
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: upload deb package
+        if: endsWith(github.event.ref, 'release')
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ${{ steps.extract.outputs.destination }}
+          asset_name: phnet.${{fromJson(steps.set_var.outputs.projJson).version}}_all.tar
+          asset_content_type: application/vnd.debian.binary-package

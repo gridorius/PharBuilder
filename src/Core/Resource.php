@@ -22,6 +22,10 @@ class Resource
         return file_get_contents($this->path);
     }
 
+    public function include(){
+        return include $this->path;
+    }
+
     public function getName()
     {
         return $this->name;
